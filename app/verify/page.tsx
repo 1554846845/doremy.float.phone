@@ -48,7 +48,7 @@ export default function VerifyPage() {
   }
 
   useEffect(() => {
-    document.title = "Float · 内测资格申请";
+    document.title = "笨笨机 · 内测资格申请";
     try {
       const saved = window.localStorage.getItem(QUERY_CODE_KEY) || "";
       if (saved) {

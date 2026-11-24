@@ -21,7 +21,7 @@ export function VerificationApplicationsClosed() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    document.title = "Float · 资格查询";
+    document.title = "笨笨机 · 资格查询";
     try {
       setCheckCode(window.localStorage.getItem(QUERY_CODE_KEY) || "");
     } catch { /* ignore */ }

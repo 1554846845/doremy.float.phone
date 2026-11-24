@@ -46,6 +46,7 @@ import { CheckPhoneApp } from "@/components/checkphone/checkphone-app";
 import { ShoppingApp } from "@/components/shopping/shopping-app";
 import { GameHubApp } from "@/components/game/game-hub-app";
 import { MixologyApp } from "@/components/mixology/mixology-app";
+import { TheaterApp } from "@/components/theater/theater-app";
 import InterviewMagazineApp from "@/components/interview/interview-magazine-app";
 import { CoCreateApp } from "@/components/cocreate/cocreate-app";
 import { AppMarketApp } from "@/components/app-market/app-market-app";
@@ -155,6 +156,19 @@ import { canSendShellNotification, sendShellNotification } from "@/lib/shell-not
 import type { ChatSharePayload } from "@/lib/chat-share";
 import { completePendingMcpOAuthCallback } from "@/lib/tool-executor";
 import { LayoutGrid, LoaderCircle, RefreshCw } from "lucide-react";
+import dynamic from "next/dynamic";
+
+// 四个新增互动应用采用路由懒加载（ssr:false），按需分包，
+// 避免进入主聊天主 bundle、影响聊天首屏与流式流畅度。
+const LazyAppLoading = () => (
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh", color: "var(--c-secondary,#999)", fontSize: 13 }}>
+    加载中…
+  </div>
+);
+const ConfessionApp = dynamic(() => import("@/components/confession/confession-app").then((m) => m.ConfessionApp), { ssr: false, loading: () => <LazyAppLoading /> });
+const QaBoxApp = dynamic(() => import("@/components/qabox/qabox-app").then((m) => m.QaBoxApp), { ssr: false, loading: () => <LazyAppLoading /> });
+const DiaryExchangeApp = dynamic(() => import("@/components/diary-exchange/diary-exchange-app").then((m) => m.DiaryExchangeApp), { ssr: false, loading: () => <LazyAppLoading /> });
+const CouponApp = dynamic(() => import("@/components/coupon/coupon-app").then((m) => m.CouponApp), { ssr: false, loading: () => <LazyAppLoading /> });
 
 const EMOJI_FONTS = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla"';
 
@@ -4503,6 +4517,26 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
           />
         </CustomAppForegroundBoundary>
       );
+    }
+
+    if (activeApp === "theater") {
+      return <TheaterApp onNotice={setNotice} />;
+    }
+
+    if (activeApp === "confession") {
+      return <ConfessionApp onNotice={setNotice} />;
+    }
+
+    if (activeApp === "qabox") {
+      return <QaBoxApp onNotice={setNotice} />;
+    }
+
+    if (activeApp === "diary_exchange") {
+      return <DiaryExchangeApp onNotice={setNotice} />;
+    }
+
+    if (activeApp === "coupon") {
+      return <CouponApp onNotice={setNotice} />;
     }
 
     if (activeApp === "vnmode") {

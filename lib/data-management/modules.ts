@@ -180,10 +180,17 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
     critical: true,
     sources: [
       { type: "indexeddb", dbName: "ai_phone_memory_db_v1", label: "记忆数据库" },
+      { type: "indexeddb", dbName: "ai_phone_lover_memory_db_v1", label: "恋人记忆库" },
       {
         type: "kv",
         label: "记忆配置与计数",
-        keys: ["ai_phone_memory_config_v1"],
+        keys: [
+          "ai_phone_memory_config_v1",
+          "ai_phone_lover_memory_config_v1",
+          "ai_phone_lover_profile_v1",
+          "ai_phone_lover_memory_ingested_v1",
+          "ai_phone_lover_memory_last_backup_v1",
+        ],
         prefixes: [
           "ai_phone_mem_evt_count_",
           "ai_phone_mem_last_sum_",
@@ -338,6 +345,11 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
       { type: "indexeddb", dbName: "AiPhoneCheckPhoneDB", label: "查手机快照" },
       { type: "indexeddb", dbName: "world-builder-scenes", label: "世界构建场景" },
       { type: "indexeddb", dbName: "world-builder-models", label: "世界构建模型" },
+      { type: "indexeddb", dbName: "ai_phone_theater_db_v1", label: "小剧场" },
+      { type: "indexeddb", dbName: "ai_phone_confession_db_v1", label: "忏悔室" },
+      { type: "indexeddb", dbName: "ai_phone_qabox_db_v1", label: "匿名问答箱" },
+      { type: "indexeddb", dbName: "ai_phone_diary_exchange_db_v1", label: "交换日记" },
+      { type: "indexeddb", dbName: "ai_phone_coupon_db_v1", label: "惩罚券" },
       {
         type: "kv",
         label: "创作玩法配置",
@@ -370,6 +382,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "mixology_sessions_v1",
           "mixology_builtin_version_v1",
           "mixology_profile_v1",
+          "ai_phone_theater_config_v1",
         ],
         prefixes: ["map_world_theme_", "map_adventure_summary_", "ai_phone_black_market_theater_events_"],
       },

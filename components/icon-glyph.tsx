@@ -41,6 +41,11 @@ import {
   mdiGlassCocktail,
   mdiStorefrontOutline,
   mdiPhone,
+  mdiDramaMasks,
+  mdiChurch,
+  mdiCommentQuestionOutline,
+  mdiBookMultipleOutline,
+  mdiTicketConfirmation,
 } from "@mdi/js";
 
 type IconGlyphProps = {
@@ -83,6 +88,11 @@ const MDI_PATHS: Record<IconId, string> = {
   characters: mdiAccount,
   dwelling: mdiHome,
   realitybridge: mdiBridge,
+  theater: mdiDramaMasks,
+  confession: mdiChurch,
+  qabox: mdiCommentQuestionOutline,
+  diary_exchange: mdiBookMultipleOutline,
+  coupon: mdiTicketConfirmation,
 };
 
 export function IconGlyph({ id, className }: IconGlyphProps) {

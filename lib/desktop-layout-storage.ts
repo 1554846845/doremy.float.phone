@@ -115,11 +115,11 @@ export function createDefaultDesktopIconLayout(_widgets: WidgetInstance[] = []):
       row: 4 + Math.floor(i / 2),
       col: 3 + (i % 2),
     })),
-    // 第四页：新生活应用独立成页，留出足够间距，不与旧图标/桌面组件重叠
+    // 第四页：生活/互动应用独立成页，三列排布，容纳生活/剧场/忏悔/问答/日记/惩罚券
     page4: PAGE_4_DEFAULT.map((id, i) => ({
       id,
-      row: 3 + Math.floor(i / 2),
-      col: 2 + (i % 2),
+      row: 3 + Math.floor(i / 3),
+      col: 1 + (i % 3),
     })),
   } as DesktopIconLayout;
 }

@@ -120,7 +120,7 @@ export default function VerifyAdminPage() {
   }, [unlocked]);
 
   useEffect(() => {
-    document.title = "Float · 审核台";
+    document.title = "笨笨机 · 审核台";
     try {
       const saved = window.localStorage.getItem(ADMIN_KEY_STORAGE) || "";
       if (saved) { setKey(saved); void refresh(saved, "pending"); }

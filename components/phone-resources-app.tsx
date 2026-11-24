@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Brain, Filter, MoreHorizontal, Sparkles } from "lucide-react";
+import { Brain, Filter, Heart, MoreHorizontal, Sparkles } from "lucide-react";
 import { MemoryBankPage } from "./memory/memory-bank-page";
+import { LoverMemoryApp } from "./lover-memory/lover-memory-app";
 import { VnAssetPage } from "./vn/vn-asset-page";
 import { loadCharacters } from "@/lib/character-storage";
 import { PageShell } from "./ui/page-shell";
 import { FeaturedCard, type FeaturedCardItem } from "./ui/card-grid";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 
-export type ResourceSubPage = "main" | "memory" | "vn_assets";
+export type ResourceSubPage = "main" | "memory" | "vn_assets" | "lover_memory";
 type MemoryView = "list" | "detail" | "settings";
 
 const RESOURCE_MENU: Omit<FeaturedCardItem, "onClick">[] = [
@@ -20,6 +21,13 @@ const RESOURCE_MENU: Omit<FeaturedCardItem, "onClick">[] = [
         desc: "角色记忆档案",
         iconColor: BINDING_ACCENTS.memory,
         glassIcon: "memory",
+    },
+    {
+        id: "lover_memory",
+        icon: Heart,
+        label: "恋人记忆",
+        desc: "专属你们的个人记忆库",
+        iconColor: "#ec4899",
     },
     {
         id: "vn_assets",
@@ -88,6 +96,7 @@ export function PhoneResourcesApp({ onClose, onNotice, initialPage }: { onClose:
                 : memoryView === "detail" ? (memoryCharName || "记忆详情")
                     : "记忆库")
             : currentPage === "vn_assets" ? "漫卷资源"
+                : currentPage === "lover_memory" ? "恋人记忆"
                 : "资源库";
 
     const showSettingsIcon = currentPage === "memory" && memoryView !== "settings";
@@ -141,7 +150,7 @@ export function PhoneResourcesApp({ onClose, onNotice, initialPage }: { onClose:
                                         key={item.id}
                                         item={{
                                             ...item,
-                                            onClick: () => setCurrentPage(item.id === "vn_assets" ? "vn_assets" : "memory"),
+                                            onClick: () => setCurrentPage(item.id as ResourceSubPage),
                                         }}
                                     />
                                 ))}
@@ -164,6 +173,10 @@ export function PhoneResourcesApp({ onClose, onNotice, initialPage }: { onClose:
                         onFilterOpenChange={handleMemoryFilterOpenChange}
                         onFilterStateChange={handleMemoryFilterStateChange}
                     />
+                )}
+
+                {currentPage === "lover_memory" && (
+                    <LoverMemoryApp onNotice={onNotice} />
                 )}
             </div>
         </PageShell>

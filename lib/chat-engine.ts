@@ -66,6 +66,10 @@ import { fetchLlmPayload } from "./llm-http";
 import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
+import { buildLoverMemoryContext } from "./lover-memory-injector";
+import { buildLoverProfileContext } from "./lover-memory-profile";
+import { autoSettleChatToLoverMemory } from "./lover-memory-ingest";
+import { buildTheaterContext } from "./theater-context";
 import { maybeRunSummarization } from "./memory-summarizer";
 import { prepareShortTermContext } from "./short-term-assembler";
 import { parseActionTags, dispatchActions } from "./action-parser";
@@ -1968,10 +1972,28 @@ export async function buildChatPromptMessages(
         buildMusicCloudMacro(),
     ]);
 
+    const loverMemories = await buildLoverMemoryContext(character.id, wbActivationContext).catch(() => "");
+    const loverProfile = buildLoverProfileContext(character.id);
+    const theaterMainline = await buildTheaterContext(character.id).catch(() => "");
+
+    // 聊天实时自动沉淀归档：把本轮最近的用户/角色发言写进恋人记忆库（独立、幂等、不阻塞）。
+    // 仅取末尾几条，避免每轮全量遍历；异常吞掉，绝不影响聊天。
+    const recentForIngest = history.slice(-8).map((msg) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        createdAt: msg.createdAt,
+    }));
+    void autoSettleChatToLoverMemory(character.id, recentForIngest);
+
     const longTermMemories = [
+        // 恋人档案最高优先级：永远先于其它记忆，切换模型/接口都不丢。
+        loverProfile,
         memResults ? formatLongTermMemories(memResults) : "",
         buildLifeMemoryContext(character.id),
         buildLifePresenceContext(character.id),
+        loverMemories,
+        theaterMainline,
     ].filter(Boolean).join("\n\n");
     const coreMemories = coreResults ? formatCoreMemories(coreResults) : "";
     const scheduleSummary = buildCalendarScheduleMarker("character", character.id, getWeekStartIso(now));

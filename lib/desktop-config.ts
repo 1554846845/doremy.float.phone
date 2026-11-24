@@ -35,6 +35,11 @@ export type IconId =
   | "photowall"
   | "watchtogether"
   | "callstats"
+  | "theater"
+  | "confession"
+  | "qabox"
+  | "diary_exchange"
+  | "coupon"
 ;
 
 // 桌面文件夹：以 folder: 前缀的 id 伪装成图标占一个格子参与拖拽/换页，
@@ -75,8 +80,8 @@ export const PAGE_2_DEFAULT: IconId[] = [
 ];
 
 // 第三页放系统/工具类应用；生活、档案、照片墙、一起看单独放到第四页，避免与已有图标/组件抢位置。
-export const PAGE_3_DEFAULT: IconId[] = ["worldbuilder", "qa", "resource_hub", "realitybridge", "mixology"];
-export const PAGE_4_DEFAULT: IconId[] = ["life", "archive", "photowall", "watchtogether", "callstats"];
+export const PAGE_3_DEFAULT: IconId[] = ["worldbuilder", "qa", "resource_hub", "realitybridge", "mixology", "confession"];
+export const PAGE_4_DEFAULT: IconId[] = ["life", "archive", "photowall", "watchtogether", "callstats", "theater", "qabox", "diary_exchange", "coupon"];
 
 export const DOCK_DEFAULT: IconId[] = ["settings", "theme", "resources", "characters"];
 
@@ -137,4 +142,9 @@ export const ICONS: Record<IconId, IconMeta> = {
   photowall: { id: "photowall", label: "照片墙", tone: "var(--c-icon-rose)", placeholder: false },
   watchtogether: { id: "watchtogether", label: "一起看", tone: "var(--c-icon-sage, #7e8b78)", placeholder: false },
   callstats: { id: "callstats", label: "通话统计", tone: "var(--c-icon-teal)", placeholder: false },
+  theater: { id: "theater", label: "小剧场", tone: "var(--c-icon-slate)", placeholder: false },
+  confession: { id: "confession", label: "忏悔室", tone: "var(--c-icon-violet)", placeholder: false },
+  qabox: { id: "qabox", label: "问答箱", tone: "var(--c-icon-blue)", placeholder: false },
+  diary_exchange: { id: "diary_exchange", label: "交换日记", tone: "var(--c-icon-rose)", placeholder: false },
+  coupon: { id: "coupon", label: "惩罚券", tone: "var(--c-icon-coral)", placeholder: false },
 };

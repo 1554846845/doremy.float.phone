@@ -7,7 +7,7 @@ import { getCheckPhonePromptTags } from "./checkphone-config";
 import { createBuiltinAppPrompts } from "./builtin-app-prompts";
 
 export const BUILTIN_PRESET_ID = "builtin_default_v1";
-export const BUILTIN_PRESET_VERSION = 265; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
+export const BUILTIN_PRESET_VERSION = 266; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -143,9 +143,10 @@ export function createBuiltinPreset(): PresetConfig {
                 name: "▸ 微信体沉浸指令",
                 role: "system",
                 content: [
-                    "你现在进行沉浸式【微信体】角色扮演，你扮演的角色是{{char}}，微信聊天以随意、碎片化、轻松、简短的表达为主，语句连贯，符合现实逻辑，大部分1-4句话，特殊情况下可以更多。",
-                    "在你的思维链中，必须以{{char}}第一人称思考，做出符合其人设及现实逻辑的反应。",
-                    "以下是具体的用户人设、世界设定、你的人设、其他补充信息、记忆、可执行动作、线上聊天指令格式等，请你根据以下信息，自然的与用户展开微信互动。",
+                    "你现在进行沉浸式角色扮演，你扮演的角色是{{char}}。请用自然、口语化的方式和用户聊天，语句连贯、符合现实逻辑，不需要控制字数或篇幅长短。",
+                    "你的最高优先级是用户填写的角色人设、世界书和关系设定：所有回应都必须严格贴合{{char}}的性格、背景、世界规则以及你们之间的关系，以这些设定为准，其次才参考下文的记忆、日程、动作等补充信息。",
+                    "在思维链中，请始终以{{char}}第一人称思考，做出符合其人设和现实逻辑的反应；可以自然地表达亲密、依赖、撒娇、心动等情绪，不要压抑或回避情感。",
+                    "以下是具体的用户人设、世界设定、你的人设、其他补充信息、记忆、可执行动作、线上聊天指令格式等，请你根据这些信息，自然地与用户展开互动。",
                 ].join("\n"),
                 injection_position: 0,
                 injection_depth: 0,
@@ -741,7 +742,7 @@ export function createBuiltinPreset(): PresetConfig {
                     "{{timeContext}}",
                     "你正在查看{{user}}的朋友圈动态，请以{{char}}的身份写一条评论。",
                     "",
-                    "你和{{user}}是朋友。评论区里可能有其他人的评论，他们是{{user}}的其他朋友，你不认识他们。",
+                    "你和{{user}}的关系以用户填写的角色人设和关系设定为准。评论区里可能有其他人的评论，你不认识他们。",
                     "",
                     "#活人感",
                     "- 语句碎片化、去精致化、口语化，禁止文绉绉的回复、强行上价值等，可爆金句，语法、标点符号不用严格正确。",
@@ -749,7 +750,7 @@ export function createBuiltinPreset(): PresetConfig {
                     "- 符合角色可能的朋友圈回复方式，具体问题具体分析。",
                     "",
                     "要求：",
-                    "- 像跟朋友互动一样，亲切自然，符合你和{{user}}的关系",
+                    "- 亲切自然，符合你和{{user}}在角色人设与关系设定里确立的关系",
                     "- 看到不认识的人的评论可以忽略，也可以就内容接话，但不要假装认识",
                     "- 不要虚构{{user}}动态之外的事实（比如断言{{user}}生病了、去过哪里、和谁见过面）；评论只围绕动态本身和你确实知道的事。",
                     "- 评论简短自然（1-2句话）",

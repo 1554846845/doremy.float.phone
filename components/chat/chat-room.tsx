@@ -781,6 +781,16 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         });
     }, []);
 
+    // 小剧场「一键转入主聊天」：监听自定义事件，把正文回填到输入框。
+    useEffect(() => {
+        const handler = (event: Event) => {
+            const text = (event as CustomEvent<{ text?: string }>).detail?.text;
+            if (typeof text === "string" && text.trim()) appendText(text, { focus: true });
+        };
+        window.addEventListener("theater-transfer-to-chat", handler);
+        return () => window.removeEventListener("theater-transfer-to-chat", handler);
+    }, [appendText]);
+
     useImperativeHandle(ref, () => ({
         appendText,
         clear: () => {
