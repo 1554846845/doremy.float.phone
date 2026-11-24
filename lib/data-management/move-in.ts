@@ -209,6 +209,7 @@ type LittlephoneBackup = {
   worldBooks?: unknown;
   memories?: unknown;
   messages?: unknown;
+  apiSettings?: unknown;
 };
 
 function isLittlephoneBackup(value: unknown): value is LittlephoneBackup {
@@ -367,6 +368,34 @@ function buildWorldBookStore(backup: LittlephoneBackup, exportedAt: string): Sto
   return { name: "worldBooks", keyPath: "id", autoIncrement: false, records };
 }
 
+function buildApiConfigRecords(backup: LittlephoneBackup): { key: string; value: string }[] | null {
+  if (!Array.isArray(backup.apiSettings)) return null;
+  const main = backup.apiSettings.find((item): item is { id?: string; configs?: unknown } => !!item && typeof item === "object");
+  const configs = main?.configs;
+  if (!configs || typeof configs !== "object") return null;
+  const chat = (configs as Record<string, unknown>).chat;
+  if (!chat || typeof chat !== "object") return null;
+  const c = chat as Record<string, unknown>;
+  const url = typeof c.url === "string" ? c.url : "";
+  const key = typeof c.key === "string" ? c.key : "";
+  const model = typeof c.model === "string" ? c.model : "";
+  if (!url && !key && !model) return null;
+  // 鲸鱼机的聊天接口是 OpenAI 兼容中转，映射成一条可用的 ApiConfig。
+  const apiConfig = {
+    id: generateId("api"),
+    name: "鲸鱼机导入的聊天 API",
+    provider: "openai",
+    apiKey: key,
+    baseUrl: url || undefined,
+    defaultModel: model || "gpt-4o-mini",
+    enableNativeTools: false,
+    enableImageRecognition: true,
+    enableImageGeneration: false,
+    preventEmptyGenerateRambling: true,
+  };
+  return [{ key: "ai_phone_api_configs_v1", value: JSON.stringify([apiConfig]) }];
+}
+
 function convertLittlephoneBackup(backup: LittlephoneBackup): BackupEnvelope {
   const exportedAt = typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString();
   const modules: ModulePayload[] = [];
@@ -402,10 +431,18 @@ function convertLittlephoneBackup(backup: LittlephoneBackup): BackupEnvelope {
     modules.push({ moduleId: "memory", sources: [{ type: "indexeddb", dbName: "ai_phone_memory_db_v1", stores: [memoryStore] }] });
   }
 
-  // 世界书 → AiPhoneSettingsDB.worldBooks（worldbook 分类从 settings 模块取）
+  // 用户设定：世界书（worldbook 分类取）+ 聊天 API 配置（settings 分类取）
+  const settingsSources: SourceBackup[] = [];
   const worldBookStore = buildWorldBookStore(backup, exportedAt);
   if (worldBookStore) {
-    modules.push({ moduleId: "settings", sources: [{ type: "indexeddb", dbName: "AiPhoneSettingsDB", stores: [worldBookStore] }] });
+    settingsSources.push({ type: "indexeddb", dbName: "AiPhoneSettingsDB", stores: [worldBookStore] });
+  }
+  const apiConfigRecords = buildApiConfigRecords(backup);
+  if (apiConfigRecords) {
+    settingsSources.push({ type: "kv", records: apiConfigRecords });
+  }
+  if (settingsSources.length > 0) {
+    modules.push({ moduleId: "settings", sources: settingsSources });
   }
 
   if (modules.length === 0) throw new Error("备份文件中没有可导入的数据模块");
