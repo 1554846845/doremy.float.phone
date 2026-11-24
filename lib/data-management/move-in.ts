@@ -6,6 +6,8 @@ import type {
   ImportResult,
   ModulePayload,
   SourceBackup,
+  StoreBackup,
+  StoreIndexBackup,
 } from "./types";
 import type { MediaResolver } from "./serializers";
 import { importSource } from "./idb";
@@ -32,7 +34,7 @@ export type MoveInCategory = {
 
 export const MOVE_IN_CATEGORIES: MoveInCategory[] = [
   { id: "characters", label: "角色人设", description: "角色卡与角色素材", moduleIds: ["characters"] },
-  { id: "worldbook", label: "世界书", description: "世界观设定", moduleIds: ["social"] },
+  { id: "worldbook", label: "世界书", description: "世界观设定与世界分组", moduleIds: ["social", "settings"] },
   { id: "chat", label: "聊天记录", description: "会话、消息与联系人", moduleIds: ["chat"] },
   { id: "memory", label: "长期记忆", description: "记忆库与恋人记忆", moduleIds: ["memory"] },
   { id: "settings", label: "用户设定", description: "API、预设、绑定与规则", moduleIds: ["settings"] },
@@ -47,14 +49,12 @@ function countSourceRecords(source: SourceBackup): number {
   return source.records.length;
 }
 
-/** 世界书只取 social 模块里的世界书键，不把朋友圈/小红书等社交数据一并搬进来 */
-function worldbookOnlySource(source: SourceBackup): SourceBackup {
-  if (source.type === "kv") {
-    return { ...source, records: source.records.filter((record) => WORLDBOOK_KEYS.includes(record.key)) };
-  }
-  return source;
-}
-
+/**
+ * 世界书分类的兼容筛选：旧版 ai-phone-backup 里的「世界书」是 social 模块下
+ * ai_phone_character_worlds_v1 / ai_phone_character_world_layout_v1 两个 KV 键；
+ * 真正的世界书配置（WorldBookConfig）则存在 settings 模块的 AiPhoneSettingsDB.worldBooks。
+ * 这里两者都认，其它社交/设置数据一律不混入。
+ */
 function sourcesForCategory(envelope: BackupEnvelope, categoryId: MoveInCategoryId): SourceBackup[] {
   const definition = MOVE_IN_CATEGORIES.find((category) => category.id === categoryId);
   if (!definition) return [];
@@ -64,8 +64,13 @@ function sourcesForCategory(envelope: BackupEnvelope, categoryId: MoveInCategory
     if (!moduleIds.has(module.moduleId)) continue;
     for (const source of module.sources) {
       if (categoryId === "worldbook") {
-        if (source.type === "kv" && source.records.some((record) => WORLDBOOK_KEYS.includes(record.key))) {
-          result.push(worldbookOnlySource(source));
+        if (source.type === "kv") {
+          if (source.records.some((record) => WORLDBOOK_KEYS.includes(record.key))) {
+            result.push({ ...source, records: source.records.filter((record) => WORLDBOOK_KEYS.includes(record.key)) });
+          }
+        } else if (source.type === "indexeddb" && source.dbName === "AiPhoneSettingsDB") {
+          const stores = source.stores.filter((store) => store.name === "worldBooks");
+          if (stores.length > 0) result.push({ ...source, stores });
         }
         continue;
       }
@@ -158,7 +163,261 @@ function synthesizeManifest(modules: ModulePayload[]): BackupManifest {
   };
 }
 
+// ── 兼容识别：鲸鱼机（littlephone）备份 ──────────────────────────
+// 鲸鱼机导出的是纯 JSON（顶层 app === "littlephone"），字段与笨笨机差异较大。
+// 这里把它的角色/世界书/聊天记录/长期记忆映射成笨笨机的 SourceBackup，
+// 复用 importSource 的合并语义导入；用户设定因结构差异过大暂不映射。
+
+type LittlephoneFriend = {
+  id?: string;
+  name?: string;
+  avatar?: string;
+  avatarImage?: string;
+  remark?: string;
+  role?: string;
+};
+
+type LittlephoneWorldBook = {
+  id?: string;
+  name?: string;
+  content?: string;
+  global?: boolean;
+  keywords?: string[];
+};
+
+type LittlephoneMemory = {
+  id?: string;
+  friendId?: string;
+  content?: string;
+  importance?: number;
+  isCore?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type LittlephoneMessage = {
+  id?: string;
+  type?: string;
+  content?: string;
+  timestamp?: string;
+};
+
+type LittlephoneBackup = {
+  app?: unknown;
+  exportedAt?: string;
+  friends?: unknown;
+  worldBooks?: unknown;
+  memories?: unknown;
+  messages?: unknown;
+};
+
+function isLittlephoneBackup(value: unknown): value is LittlephoneBackup {
+  if (!value || typeof value !== "object") return false;
+  return (value as { app?: unknown }).app === "littlephone";
+}
+
+function generateId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function validAvatar(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("data:") || trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  return null;
+}
+
+function buildChatStores(backup: LittlephoneBackup, exportedAt: string): StoreBackup[] | null {
+  const friends = Array.isArray(backup.friends) ? backup.friends.filter((item): item is LittlephoneFriend => !!item && typeof item === "object") : [];
+  const groups = Array.isArray(backup.messages) ? backup.messages.filter((item): item is { friendId?: unknown; messages?: unknown } => !!item && typeof item === "object") : [];
+
+  const friendIds = new Set<string>();
+  for (const friend of friends) if (typeof friend.id === "string") friendIds.add(friend.id);
+  for (const group of groups) if (typeof group.friendId === "string") friendIds.add(group.friendId);
+  if (friendIds.size === 0) return null;
+
+  const contacts: StoreBackup["records"] = [];
+  const sessions: StoreBackup["records"] = [];
+  const messages: StoreBackup["records"] = [];
+
+  for (const friendId of friendIds) {
+    const friend = friends.find((item) => item.id === friendId);
+    const remark = typeof friend?.remark === "string" && friend.remark ? friend.remark : "";
+    const name = typeof friend?.name === "string" ? friend.name : "";
+    const nickname = (remark || name) || undefined;
+    const sessionId = `session_${friendId}`;
+    contacts.push({
+      value: { id: friendId, characterId: friendId, nickname, addedAt: exportedAt },
+    });
+    sessions.push({
+      value: { id: sessionId, characterId: friendId, contactId: friendId, unreadCount: 0, updatedAt: exportedAt, isPinned: false },
+    });
+
+    const group = groups.find((item) => item.friendId === friendId);
+    const groupMessages = Array.isArray(group?.messages) ? group.messages.filter((item): item is LittlephoneMessage => !!item && typeof item === "object") : [];
+    for (const message of groupMessages) {
+      const content = typeof message.content === "string" ? message.content : "";
+      if (!content) continue;
+      const role = message.type === "received" ? "assistant" : message.type === "system" ? "system" : "user";
+      messages.push({
+        value: {
+          id: typeof message.id === "string" ? message.id : generateId("msg"),
+          sessionId,
+          role,
+          content,
+          status: "sent",
+          createdAt: typeof message.timestamp === "string" ? message.timestamp : exportedAt,
+        },
+      });
+    }
+  }
+
+  return [
+    {
+      name: "contacts",
+      keyPath: "id",
+      autoIncrement: false,
+      indexes: [{ name: "characterId", keyPath: "characterId", unique: false, multiEntry: false }],
+      records: contacts,
+    },
+    {
+      name: "sessions",
+      keyPath: "id",
+      autoIncrement: false,
+      indexes: [{ name: "contactId", keyPath: "contactId", unique: false, multiEntry: false }],
+      records: sessions,
+    },
+    {
+      name: "messages",
+      keyPath: "id",
+      autoIncrement: false,
+      indexes: [
+        { name: "sessionId", keyPath: "sessionId", unique: false, multiEntry: false },
+        { name: "createdAt", keyPath: "createdAt", unique: false, multiEntry: false },
+      ],
+      records: messages,
+    },
+  ];
+}
+
+function buildMemoryStore(backup: LittlephoneBackup, exportedAt: string): StoreBackup | null {
+  const memories = Array.isArray(backup.memories) ? backup.memories.filter((item): item is LittlephoneMemory => !!item && typeof item === "object") : [];
+  const records: StoreBackup["records"] = [];
+  for (const memory of memories) {
+    const characterId = typeof memory.friendId === "string" ? memory.friendId : "";
+    const content = typeof memory.content === "string" ? memory.content : "";
+    if (!characterId || !content) continue;
+    records.push({
+      value: {
+        id: typeof memory.id === "string" ? memory.id : generateId("mem"),
+        characterId,
+        sourceApp: "chat",
+        type: memory.isCore ? "core" : "long_term",
+        content,
+        importance: typeof memory.importance === "number" ? memory.importance : 0.5,
+        createdAt: typeof memory.createdAt === "string" ? memory.createdAt : exportedAt,
+        updatedAt: typeof memory.updatedAt === "string" ? memory.updatedAt : exportedAt,
+      },
+    });
+  }
+  if (records.length === 0) return null;
+  const indexes: StoreIndexBackup[] = [
+    { name: "by_character", keyPath: "characterId", unique: false, multiEntry: false },
+    { name: "by_character_type", keyPath: ["characterId", "type"], unique: false, multiEntry: false },
+    { name: "by_character_created", keyPath: ["characterId", "createdAt"], unique: false, multiEntry: false },
+  ];
+  return { name: "memories", keyPath: "id", autoIncrement: false, indexes, records };
+}
+
+function buildWorldBookStore(backup: LittlephoneBackup, exportedAt: string): StoreBackup | null {
+  const worldBooks = Array.isArray(backup.worldBooks) ? backup.worldBooks.filter((item): item is LittlephoneWorldBook => !!item && typeof item === "object") : [];
+  const records: StoreBackup["records"] = [];
+  const createdAt = Date.parse(exportedAt) || Date.now();
+  worldBooks.forEach((book, index) => {
+    const content = typeof book.content === "string" ? book.content : "";
+    if (!content) return;
+    const id = typeof book.id === "string" && book.id ? book.id : generateId("wb");
+    const name = typeof book.name === "string" && book.name ? book.name : "未命名世界书";
+    const keywords = Array.isArray(book.keywords) ? book.keywords.filter((item): item is string => typeof item === "string") : [];
+    records.push({
+      value: {
+        id,
+        name,
+        description: "",
+        createdAt,
+        updatedAt: createdAt,
+        entries: [
+          {
+            uid: `wb-entry_${id}`,
+            key: keywords.length > 0 ? keywords.join(",") : name,
+            content,
+            comment: "",
+            use_regex: false,
+            disable: false,
+            constant: Boolean(book.global),
+            position: "before_char",
+            insertion_order: index,
+          },
+        ],
+      },
+    });
+  });
+  if (records.length === 0) return null;
+  return { name: "worldBooks", keyPath: "id", autoIncrement: false, records };
+}
+
+function convertLittlephoneBackup(backup: LittlephoneBackup): BackupEnvelope {
+  const exportedAt = typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString();
+  const modules: ModulePayload[] = [];
+
+  // 角色人设 → KV ai_phone_characters_v1
+  const friends = Array.isArray(backup.friends) ? backup.friends.filter((item): item is LittlephoneFriend => !!item && typeof item === "object") : [];
+  const characters = friends
+    .filter((friend): friend is LittlephoneFriend & { id: string } => typeof friend.id === "string")
+    .map((friend) => ({
+      id: friend.id,
+      name: typeof friend.name === "string" && friend.name ? friend.name : friend.id,
+      avatar: validAvatar(friend.avatarImage) ?? validAvatar(friend.avatar),
+      persona: typeof friend.role === "string" ? friend.role : "",
+      createdAt: exportedAt,
+      updatedAt: exportedAt,
+    }));
+  if (characters.length > 0) {
+    modules.push({
+      moduleId: "characters",
+      sources: [{ type: "kv", records: [{ key: "ai_phone_characters_v1", value: JSON.stringify(characters) }] }],
+    });
+  }
+
+  // 聊天记录 → AiPhoneChatDB
+  const chatStores = buildChatStores(backup, exportedAt);
+  if (chatStores) {
+    modules.push({ moduleId: "chat", sources: [{ type: "indexeddb", dbName: "AiPhoneChatDB", stores: chatStores }] });
+  }
+
+  // 长期记忆 → ai_phone_memory_db_v1
+  const memoryStore = buildMemoryStore(backup, exportedAt);
+  if (memoryStore) {
+    modules.push({ moduleId: "memory", sources: [{ type: "indexeddb", dbName: "ai_phone_memory_db_v1", stores: [memoryStore] }] });
+  }
+
+  // 世界书 → AiPhoneSettingsDB.worldBooks（worldbook 分类从 settings 模块取）
+  const worldBookStore = buildWorldBookStore(backup, exportedAt);
+  if (worldBookStore) {
+    modules.push({ moduleId: "settings", sources: [{ type: "indexeddb", dbName: "AiPhoneSettingsDB", stores: [worldBookStore] }] });
+  }
+
+  if (modules.length === 0) throw new Error("备份文件中没有可导入的数据模块");
+  const manifest = synthesizeManifest(modules);
+  manifest.createdAt = exportedAt;
+  return { manifest, modules };
+}
+
 function normalizeJsonEnvelope(value: unknown): BackupEnvelope {
+  if (isLittlephoneBackup(value)) {
+    return convertLittlephoneBackup(value);
+  }
   if (Array.isArray(value)) {
     const modules = value.filter(isModulePayloadLike);
     if (modules.length === 0) throw new Error("备份文件中没有可导入的数据模块");
