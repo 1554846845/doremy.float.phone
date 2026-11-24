@@ -47,3 +47,15 @@
   --font-size-lg: 17px;  --font-size-xl: 20px;
   --font-size-2xl: 24px; --font-size-3xl: 30px;
 }
+
+/* Netlify「Powered by Netlify」徽章兜底隐藏：
+   该徽章由 Netlify 平台在部署后注入、不在源码里，无法从代码直接移除，
+   这里用 CSS 强制隐藏，避免页面右下角出现平台水印。 */
+#netlify-badge,
+.netlify-badge,
+[data-netlify-badge],
+netlify-badge {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
