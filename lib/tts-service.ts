@@ -25,6 +25,8 @@ export function resolveVoiceConfig(characterId: string, appId?: ContentAppId): V
  * Supported providers:
  * - Minimax: REST API → hex-encoded mp3
  * - OpenAI: REST API → binary audio blob
+ * - FishAudio: REST API → binary audio blob
+ * - custom: 用户自定义接口 → binary audio blob
  */
 export async function synthesizeSpeech(
     text: string,
@@ -41,6 +43,14 @@ export async function synthesizeSpeech(
 
     if (provider === "OpenAI") {
         return synthesizeOpenAI(text, voiceConfig);
+    }
+
+    if (provider === "FishAudio") {
+        return synthesizeFishAudio(text, voiceConfig);
+    }
+
+    if (provider === "custom") {
+        return synthesizeCustom(text, voiceConfig);
     }
 
     return null;
@@ -175,6 +185,66 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
 
     const blob = await response.blob();
     return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+}
+
+// ── Fish Audio TTS ──────────────────────────────────
+
+async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+    if (!config.apiKey) throw new Error("Fish Audio API Key 未配置");
+    if (!config.defaultVoice) throw new Error("Fish Audio 音色 ID (Voice ID) 未配置");
+
+    const baseUrl = (config.baseUrl || "https://api.fish.audio").replace(/\/$/, "");
+    const response = await fetchWithTimeout(`${baseUrl}/v1/tts`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            text,
+            reference_id: config.defaultVoice,
+            format: "mp3",
+        }),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`Fish Audio TTS 请求失败 (${response.status}): ${errText}`);
+    }
+
+    const blob = await response.blob();
+    return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+}
+
+// ── 自定义 TTS 接口 ──────────────────────────────────
+// 约定协议：POST {baseUrl}（完整地址），body { text, voice, model? }，
+// 可选 Authorization: Bearer {apiKey}，返回二进制音频。
+async function synthesizeCustom(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+    const baseUrl = (config.baseUrl || "").trim();
+    if (!baseUrl) throw new Error("自定义接口地址未配置");
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (config.apiKey.trim()) {
+        headers.Authorization = `Bearer ${config.apiKey}`;
+    }
+
+    const response = await fetchWithTimeout(baseUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+            text,
+            voice: config.defaultVoice || "",
+            ...(config.model ? { model: config.model } : {}),
+        }),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`自定义接口请求失败 (${response.status}): ${errText}`);
+    }
+
+    const blob = await response.blob();
+    return new Blob([await blob.arrayBuffer()], { type: blob.type || "audio/mpeg" });
 }
 
 // ── iOS audio playback that coexists with speech recognition ──────────

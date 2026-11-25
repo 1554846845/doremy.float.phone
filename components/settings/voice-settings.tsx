@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 
-const SUPPORTED_VOICE_PROVIDERS = new Set(["Minimax", "OpenAI"]);
+const SUPPORTED_VOICE_PROVIDERS = new Set(["Minimax", "OpenAI", "FishAudio", "custom"]);
 const MINIMAX_BASE_URL_OPTIONS = [
     { id: "cn", label: "国内版", baseUrl: "https://api.minimaxi.com/v1" },
     { id: "global", label: "海外版", baseUrl: "https://api.minimax.io/v1" },
@@ -30,6 +30,8 @@ const VOICE_PROVIDER_OPTIONS = [
     { value: "OpenAI", label: "OpenAI TTS" },
     { value: "MinimaxCN", label: "Minimax 语音国内版" },
     { value: "MinimaxGlobal", label: "Minimax 语音海外版" },
+    { value: "FishAudio", label: "Fish Audio" },
+    { value: "custom", label: "自定义接口" },
 ];
 
 const DEFAULT_VOICE_CONFIGS: VoiceApiConfig[] = [
@@ -182,7 +184,16 @@ function uniqueOptions(options: VoiceOption[]): VoiceOption[] {
 }
 
 function defaultVoiceOptions(provider: string): VoiceOption[] {
-    return provider === "OpenAI" ? DEFAULT_OPENAI_VOICES : DEFAULT_MINIMAX_VOICES;
+    if (provider === "OpenAI") return DEFAULT_OPENAI_VOICES;
+    if (provider === "FishAudio" || provider === "custom") return [];
+    return DEFAULT_MINIMAX_VOICES;
+}
+
+function defaultVoicePlaceholder(provider: string): string {
+    if (provider === "OpenAI") return "alloy";
+    if (provider === "FishAudio") return "Fish Audio 音色 ID";
+    if (provider === "custom") return "音色 ID";
+    return "male-qn-qingse 或克隆 Voice ID";
 }
 
 function voiceOptionsForConfig(config: VoiceApiConfig, fetchedVoices: Record<string, VoiceOption[]>): VoiceOption[] {
@@ -222,6 +233,8 @@ function makeCloneVoiceId(config: VoiceApiConfig): string {
 
 function providerSelectValue(config: VoiceApiConfig): string {
     if (config.provider === "OpenAI") return "OpenAI";
+    if (config.provider === "FishAudio") return "FishAudio";
+    if (config.provider === "custom") return "custom";
     return config.baseUrl === GLOBAL_MINIMAX_BASE_URL ? "MinimaxGlobal" : "MinimaxCN";
 }
 
@@ -313,6 +326,28 @@ export function VoiceSettings() {
             });
             setManualModelIds(prev => ({ ...prev, [id]: true }));
             setManualVoiceIds(prev => ({ ...prev, [id]: false }));
+            return;
+        }
+        if (providerOption === "FishAudio") {
+            updateConfig(id, {
+                provider: "FishAudio",
+                baseUrl: "https://api.fish.audio",
+                model: undefined,
+                defaultVoice: "",
+            });
+            setManualModelIds(prev => ({ ...prev, [id]: true }));
+            setManualVoiceIds(prev => ({ ...prev, [id]: true }));
+            return;
+        }
+        if (providerOption === "custom") {
+            updateConfig(id, {
+                provider: "custom",
+                baseUrl: "",
+                model: "",
+                defaultVoice: "",
+            });
+            setManualModelIds(prev => ({ ...prev, [id]: true }));
+            setManualVoiceIds(prev => ({ ...prev, [id]: true }));
             return;
         }
         const wasMinimax = current?.provider === "Minimax";
@@ -740,6 +775,32 @@ export function VoiceSettings() {
                                             </>
                                         )}
 
+                                        {config.provider === "FishAudio" && (
+                                            <div className="flex flex-col gap-1">
+                                                <label className="menu-desc ml-1">接口地址 (Base URL)</label>
+                                                <Input
+                                                    type="text"
+                                                    value={config.baseUrl || ""}
+                                                    onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
+                                                    placeholder="https://api.fish.audio"
+                                                />
+                                                <span className="menu-desc ml-1">留空默认使用官方地址，音色 ID 填在下方「默认音色」</span>
+                                            </div>
+                                        )}
+
+                                        {config.provider === "custom" && (
+                                            <div className="flex flex-col gap-1">
+                                                <label className="menu-desc ml-1">接口地址 (完整请求 URL)</label>
+                                                <Input
+                                                    type="text"
+                                                    value={config.baseUrl || ""}
+                                                    onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
+                                                    placeholder="https://example.com/tts"
+                                                />
+                                                <span className="menu-desc ml-1">约定协议：POST 该地址，body 为 {`{ text, voice, model? }`}，可选 Authorization: Bearer，返回二进制音频</span>
+                                            </div>
+                                        )}
+
                                         {config.provider === "Minimax" && (
                                             <>
                                                 <div className="flex flex-col gap-1">
@@ -851,7 +912,7 @@ export function VoiceSettings() {
                                                                 type="text"
                                                                 value={config.defaultVoice}
                                                                 onChange={(e) => updateConfig(config.id, { defaultVoice: e.target.value })}
-                                                                placeholder={config.provider === "OpenAI" ? "alloy" : "male-qn-qingse 或克隆 Voice ID"}
+                                                                placeholder={defaultVoicePlaceholder(config.provider)}
                                                                 className="flex-1"
                                                             />
                                                             <button
@@ -896,26 +957,28 @@ export function VoiceSettings() {
                                                     </button>
                                                 </div>
 
-                                                <div className="flex gap-2 mt-0.5">
-                                                    <button
-                                                        onClick={() => fetchVoices(config)}
-                                                        disabled={isFetching[config.id]}
-                                                        className="ui-btn ui-btn ui-btn-soft-action w-full"
-                                                    >
-                                                        <RefreshCw size={16} className={isFetching[config.id] ? "animate-spin" : ""} />
-                                                        {isFetching[config.id] ? "同步中..." : config.provider === "Minimax" ? "同步音色列表" : "显示默认音色"}
-                                                    </button>
-                                                    {config.provider === "Minimax" && (
+                                                {(config.provider === "Minimax" || config.provider === "OpenAI") && (
+                                                    <div className="flex gap-2 mt-0.5">
                                                         <button
-                                                            onClick={() => openCloneModal(config)}
-                                                            disabled={!config.apiKey.trim()}
-                                                            className="ui-btn ui-btn-soft-action w-full"
+                                                            onClick={() => fetchVoices(config)}
+                                                            disabled={isFetching[config.id]}
+                                                            className="ui-btn ui-btn ui-btn-soft-action w-full"
                                                         >
-                                                            <Upload size={16} />
-                                                            上传音频克隆音色
+                                                            <RefreshCw size={16} className={isFetching[config.id] ? "animate-spin" : ""} />
+                                                            {isFetching[config.id] ? "同步中..." : config.provider === "Minimax" ? "同步音色列表" : "显示默认音色"}
                                                         </button>
-                                                    )}
-                                                </div>
+                                                        {config.provider === "Minimax" && (
+                                                            <button
+                                                                onClick={() => openCloneModal(config)}
+                                                                disabled={!config.apiKey.trim()}
+                                                                className="ui-btn ui-btn-soft-action w-full"
+                                                            >
+                                                                <Upload size={16} />
+                                                                上传音频克隆音色
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
 
                                                 {fetchError[config.id] && (
                                                     <Alert variant="danger">
