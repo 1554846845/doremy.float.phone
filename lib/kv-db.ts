@@ -86,9 +86,12 @@ function removeLegacyLocalStorageKeyIfValue(key: string, value: string): void {
     }
 }
 
-// localStorage 配额只有 ~5MB,超过这个量级的 value(如自定义APP的整批
-// 音频/封面 dataURL)镜像必失败,setItem 前还得整份拷贝一次内存——直接跳过。
-const LOCAL_STORAGE_MIRROR_MAX_LENGTH = 400_000;
+// localStorage 配额约 ~5MB，超过这个量级的 value（如自定义 APP 的整批音频/封面
+// dataURL）镜像必失败。阈值放宽到 4MB：主题预设（最多 20 套完整方案）序列化后
+// 常达数百 KB 到 1MB+，若按旧阈值 400KB 跳过镜像，用户清后台强杀时这部分
+// 「美化」数据就没有同步兜底、只能靠 fire-and-forget 的 IndexedDB 写入，容易丢。
+// setItem 前仍需整份拷贝内存，但 4MB 内可接受；超配额由 try-catch 兜底。
+const LOCAL_STORAGE_MIRROR_MAX_LENGTH = 4_000_000;
 
 function writeFallbackLocalStorage(key: string, value: string): void {
     if (typeof window === "undefined" || !isManagedLegacyKey(key)) return;

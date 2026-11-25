@@ -27,7 +27,6 @@ tools/weixin-local-assistant/config.txt
 # Tailscale serve cert files (written into cwd by `tailscale cert`)
 *.ts.net.crt
 *.ts.net.key
-/public/models/world-builder/
 
 # 一起看内置解析的本地视频缓存
 .watch-cache/

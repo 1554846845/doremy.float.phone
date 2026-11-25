@@ -675,36 +675,95 @@ export async function importSource(
         onProgress?.(doneRecords, totalRecords);
         continue;
       }
-      for (let recordIndex = 0; recordIndex < storePayload.records.length; recordIndex += 1) {
-        let done: Promise<void> | null = null;
-        try {
-          const record = storePayload.records[recordIndex];
-          const key = await deserializeValue(record.key);
-          const value = await deserializeValue(record.value, resolver);
-          const hasKey = key !== undefined && key !== null;
-          const transaction = db.transaction(storePayload.name, "readwrite");
-          done = transactionDone(transaction);
-          const store = transaction.objectStore(storePayload.name);
-          const existing = hasKey ? await runRequest(store.get(key as IDBValidKey)) : undefined;
-          if (existing !== undefined && !overwrite) {
-            await done;
-            result.skipped += 1;
-            continue;
+      const BATCH_SIZE = 200;
+      type PreparedRecord = { recordIndex: number; key: unknown; value: unknown; hasKey: boolean };
+      for (let start = 0; start < storePayload.records.length; start += BATCH_SIZE) {
+        const end = Math.min(start + BATCH_SIZE, storePayload.records.length);
+        const prepared: PreparedRecord[] = [];
+        for (let recordIndex = start; recordIndex < end; recordIndex += 1) {
+          try {
+            const record = storePayload.records[recordIndex];
+            const key = await deserializeValue(record.key);
+            const value = await deserializeValue(record.value, resolver);
+            prepared.push({
+              recordIndex,
+              key,
+              value,
+              hasKey: key !== undefined && key !== null,
+            });
+          } catch (error) {
+            result.errors.push(`${payload.dbName}.${storePayload.name}#${recordIndex + 1}: ${formatImportError(error)}`);
+            tick();
           }
-          if (store.keyPath === null && hasKey) {
-            await runRequest(store.put(value, key as IDBValidKey));
-          } else {
-            await runRequest(store.put(value));
-          }
-          await done;
-          if (existing !== undefined) result.overwritten += 1;
-          else result.added += 1;
-        } catch (error) {
-          await done?.catch(() => undefined);
-          result.errors.push(`${payload.dbName}.${storePayload.name}#${recordIndex + 1}: ${formatImportError(error)}`);
-        } finally {
-          tick();
         }
+
+        if (prepared.length === 0) continue;
+
+        let batchSucceeded = false;
+        let batchDone: Promise<void> | null = null;
+        let batchAdded = 0;
+        let batchSkipped = 0;
+        let batchOverwritten = 0;
+        try {
+          const transaction = db.transaction(storePayload.name, "readwrite");
+          batchDone = transactionDone(transaction);
+          const store = transaction.objectStore(storePayload.name);
+          for (const item of prepared) {
+            const existing = item.hasKey ? await runRequest(store.get(item.key as IDBValidKey)) : undefined;
+            if (existing !== undefined && !overwrite) {
+              batchSkipped += 1;
+              continue;
+            }
+            if (store.keyPath === null && item.hasKey) {
+              await runRequest(store.put(item.value, item.key as IDBValidKey));
+            } else {
+              await runRequest(store.put(item.value));
+            }
+            if (existing !== undefined) batchOverwritten += 1;
+            else batchAdded += 1;
+          }
+          await batchDone;
+          result.added += batchAdded;
+          result.skipped += batchSkipped;
+          result.overwritten += batchOverwritten;
+          batchSucceeded = true;
+          doneRecords += prepared.length;
+          onProgress?.(doneRecords, totalRecords);
+        } catch {
+          await batchDone?.catch(() => undefined);
+        }
+
+        if (!batchSucceeded) {
+          for (const item of prepared) {
+            let done: Promise<void> | null = null;
+            try {
+              const transaction = db.transaction(storePayload.name, "readwrite");
+              done = transactionDone(transaction);
+              const store = transaction.objectStore(storePayload.name);
+              const existing = item.hasKey ? await runRequest(store.get(item.key as IDBValidKey)) : undefined;
+              if (existing !== undefined && !overwrite) {
+                await done;
+                result.skipped += 1;
+                continue;
+              }
+              if (store.keyPath === null && item.hasKey) {
+                await runRequest(store.put(item.value, item.key as IDBValidKey));
+              } else {
+                await runRequest(store.put(item.value));
+              }
+              await done;
+              if (existing !== undefined) result.overwritten += 1;
+              else result.added += 1;
+            } catch (error) {
+              await done?.catch(() => undefined);
+              result.errors.push(`${payload.dbName}.${storePayload.name}#${item.recordIndex + 1}: ${formatImportError(error)}`);
+            } finally {
+              tick();
+            }
+          }
+        }
+
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
     }
   } finally {
