@@ -26,6 +26,12 @@ const MINIMAX_PITCH_MIN = -12;
 const MINIMAX_PITCH_MAX = 12;
 const MINIMAX_PITCH_STEP = 1;
 const DEFAULT_SPEECH_PITCH = 0;
+// 情感强度：0=中性（不带情绪标签），100=最强。Minimax 按是否 >0 开关情绪标签，
+// 自定义接口透传 emotion_strength。Fish Audio/OpenAI 无原生支持，仅保存设置。
+const EMOTION_STRENGTH_MIN = 0;
+const EMOTION_STRENGTH_MAX = 100;
+const EMOTION_STRENGTH_STEP = 5;
+const DEFAULT_EMOTION_STRENGTH = 60;
 const VOICE_PROVIDER_OPTIONS = [
     { value: "OpenAI", label: "OpenAI TTS" },
     { value: "MinimaxCN", label: "Minimax 语音国内版" },
@@ -45,6 +51,7 @@ const DEFAULT_VOICE_CONFIGS: VoiceApiConfig[] = [
         defaultVoice: "male-qn-qingse",
         speechSpeed: DEFAULT_SPEECH_SPEED,
         speechPitch: DEFAULT_SPEECH_PITCH,
+        emotionStrength: DEFAULT_EMOTION_STRENGTH,
         enableSTT: true,
         enableTTS: true,
     }
@@ -208,7 +215,10 @@ function normalizeVoiceConfigs(configs: VoiceApiConfig[]): VoiceApiConfig[] {
     return configs
         .filter(config => SUPPORTED_VOICE_PROVIDERS.has(config.provider))
         .map(config => {
-            if (config.provider !== "Minimax") return config;
+            const emotionStrength = typeof config.emotionStrength === "number" && Number.isFinite(config.emotionStrength)
+                ? Math.min(EMOTION_STRENGTH_MAX, Math.max(EMOTION_STRENGTH_MIN, Math.round(config.emotionStrength)))
+                : DEFAULT_EMOTION_STRENGTH;
+            if (config.provider !== "Minimax") return { ...config, emotionStrength };
             const baseUrl = MINIMAX_BASE_URL_OPTIONS.some(option => option.baseUrl === config.baseUrl)
                 ? config.baseUrl
                 : DEFAULT_MINIMAX_BASE_URL;
@@ -218,7 +228,7 @@ function normalizeVoiceConfigs(configs: VoiceApiConfig[]): VoiceApiConfig[] {
             const speechPitch = typeof config.speechPitch === "number" && Number.isFinite(config.speechPitch)
                 ? Math.min(MINIMAX_PITCH_MAX, Math.max(MINIMAX_PITCH_MIN, Math.round(config.speechPitch)))
                 : DEFAULT_SPEECH_PITCH;
-            return { ...config, baseUrl, speechSpeed, speechPitch };
+            return { ...config, baseUrl, speechSpeed, speechPitch, emotionStrength };
         });
 }
 
@@ -290,6 +300,7 @@ export function VoiceSettings() {
             model: "speech-2.8-turbo",
             defaultVoice: "male-qn-qingse",
             speechSpeed: DEFAULT_SPEECH_SPEED,
+            emotionStrength: DEFAULT_EMOTION_STRENGTH,
             enableSTT: true,
             enableTTS: true,
         };
@@ -596,6 +607,80 @@ export function VoiceSettings() {
 
     if (!isLoaded) return null;
 
+    // 语速/音调/情感强度滑块（共享）：Minimax 与自定义接口实际生效，
+    // Fish Audio/OpenAI 无原生支持则仅保存设置（自定义接口会透传这些字段）。
+    const renderSpeechParamSliders = (config: VoiceApiConfig) => {
+        const speed = config.speechSpeed ?? DEFAULT_SPEECH_SPEED;
+        const pitch = config.speechPitch ?? DEFAULT_SPEECH_PITCH;
+        const emotion = config.emotionStrength ?? DEFAULT_EMOTION_STRENGTH;
+        return (
+            <>
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between px-1">
+                        <label className="menu-desc">语速 (Speed)</label>
+                        <span className="menu-label font-medium">{speed.toFixed(1)}×</span>
+                    </div>
+                    <input
+                        type="range"
+                        min={MINIMAX_SPEED_MIN}
+                        max={MINIMAX_SPEED_MAX}
+                        step={MINIMAX_SPEED_STEP}
+                        value={speed}
+                        onChange={(e) => updateConfig(config.id, { speechSpeed: Number(e.target.value) })}
+                        className="w-full accent-black"
+                        aria-label="语速"
+                    />
+                    <div className="relative h-4 px-1 text-xs text-gray-500" aria-hidden="true">
+                        <span className="absolute left-1 whitespace-nowrap">{MINIMAX_SPEED_MIN.toFixed(1)}×</span>
+                        <span className="absolute whitespace-nowrap" style={{ left: "33.333%", transform: "translateX(-50%)" }}>1.0× 默认</span>
+                        <span className="absolute right-1 whitespace-nowrap">{MINIMAX_SPEED_MAX.toFixed(1)}×</span>
+                    </div>
+                </div>
+                <div className="flex flex-col gap-1 -mt-1">
+                    <div className="flex items-center justify-between px-1">
+                        <label className="menu-desc">音调 (Pitch)</label>
+                        <span className="menu-label font-medium">{pitch}</span>
+                    </div>
+                    <input
+                        type="range"
+                        min={MINIMAX_PITCH_MIN}
+                        max={MINIMAX_PITCH_MAX}
+                        step={MINIMAX_PITCH_STEP}
+                        value={pitch}
+                        onChange={(e) => updateConfig(config.id, { speechPitch: Number(e.target.value) })}
+                        className="w-full accent-black"
+                        aria-label="音调"
+                    />
+                    <div className="relative h-4 px-1 text-xs text-gray-500" aria-hidden="true">
+                        <span className="absolute left-1 whitespace-nowrap">{MINIMAX_PITCH_MIN}</span>
+                        <span className="absolute whitespace-nowrap" style={{ left: "50%", transform: "translateX(-50%)" }}>0 默认</span>
+                        <span className="absolute right-1 whitespace-nowrap">+{MINIMAX_PITCH_MAX}</span>
+                    </div>
+                </div>
+                <div className="flex flex-col gap-1 -mt-1">
+                    <div className="flex items-center justify-between px-1">
+                        <label className="menu-desc">情感强度 (Emotion)</label>
+                        <span className="menu-label font-medium">{emotion}</span>
+                    </div>
+                    <input
+                        type="range"
+                        min={EMOTION_STRENGTH_MIN}
+                        max={EMOTION_STRENGTH_MAX}
+                        step={EMOTION_STRENGTH_STEP}
+                        value={emotion}
+                        onChange={(e) => updateConfig(config.id, { emotionStrength: Number(e.target.value) })}
+                        className="w-full accent-black"
+                        aria-label="情感强度"
+                    />
+                    <div className="relative h-4 px-1 text-xs text-gray-500" aria-hidden="true">
+                        <span className="absolute left-1 whitespace-nowrap">0 中性</span>
+                        <span className="absolute right-1 whitespace-nowrap">{EMOTION_STRENGTH_MAX} 强烈</span>
+                    </div>
+                </div>
+            </>
+        );
+    };
+
     return (
         <div className="flex flex-col gap-6">
             <div className="flex items-center">
@@ -776,75 +861,42 @@ export function VoiceSettings() {
                                         )}
 
                                         {config.provider === "FishAudio" && (
-                                            <div className="flex flex-col gap-1">
-                                                <label className="menu-desc ml-1">接口地址 (Base URL)</label>
-                                                <Input
-                                                    type="text"
-                                                    value={config.baseUrl || ""}
-                                                    onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
-                                                    placeholder="https://api.fish.audio"
-                                                />
-                                                <span className="menu-desc ml-1">留空默认使用官方地址，音色 ID 填在下方「默认音色」</span>
-                                            </div>
+                                            <>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="menu-desc ml-1">接口地址 (Base URL)</label>
+                                                    <Input
+                                                        type="text"
+                                                        value={config.baseUrl || ""}
+                                                        onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
+                                                        placeholder="https://api.fish.audio"
+                                                    />
+                                                    <span className="menu-desc ml-1">留空默认使用官方地址，音色 ID 填在下方「默认音色」</span>
+                                                </div>
+                                                {renderSpeechParamSliders(config)}
+                                                <span className="menu-desc ml-1">Fish Audio 官方接口不支持语速/音调/情感强度，以上参数仅作保存</span>
+                                            </>
                                         )}
 
                                         {config.provider === "custom" && (
-                                            <div className="flex flex-col gap-1">
-                                                <label className="menu-desc ml-1">接口地址 (完整请求 URL)</label>
-                                                <Input
-                                                    type="text"
-                                                    value={config.baseUrl || ""}
-                                                    onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
-                                                    placeholder="https://example.com/tts"
-                                                />
-                                                <span className="menu-desc ml-1">约定协议：POST 该地址，body 为 {`{ text, voice, model? }`}，可选 Authorization: Bearer，返回二进制音频</span>
-                                            </div>
+                                            <>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="menu-desc ml-1">接口地址 (完整请求 URL)</label>
+                                                    <Input
+                                                        type="text"
+                                                        value={config.baseUrl || ""}
+                                                        onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
+                                                        placeholder="https://example.com/tts"
+                                                    />
+                                                    <span className="menu-desc ml-1">约定协议：POST 该地址，body 为 {`{ text, voice, model? }`}，可选 Authorization: Bearer，返回二进制音频</span>
+                                                </div>
+                                                {renderSpeechParamSliders(config)}
+                                                <span className="menu-desc ml-1">语速/音调/情感强度会透传为 body 里的 speed / pitch / emotion_strength 字段</span>
+                                            </>
                                         )}
 
                                         {config.provider === "Minimax" && (
                                             <>
-                                                <div className="flex flex-col gap-1">
-                                                    <div className="flex items-center justify-between px-1">
-                                                        <label className="menu-desc">语速 (Speed)</label>
-                                                        <span className="menu-label font-medium">{(config.speechSpeed ?? DEFAULT_SPEECH_SPEED).toFixed(1)}×</span>
-                                                    </div>
-                                                    <input
-                                                        type="range"
-                                                        min={MINIMAX_SPEED_MIN}
-                                                        max={MINIMAX_SPEED_MAX}
-                                                        step={MINIMAX_SPEED_STEP}
-                                                        value={config.speechSpeed ?? DEFAULT_SPEECH_SPEED}
-                                                        onChange={(e) => updateConfig(config.id, { speechSpeed: Number(e.target.value) })}
-                                                        className="w-full accent-black"
-                                                        aria-label="Minimax 语速"
-                                                    />
-                                                    <div className="relative h-4 px-1 text-xs text-gray-500" aria-hidden="true">
-                                                        <span className="absolute left-1 whitespace-nowrap">{MINIMAX_SPEED_MIN.toFixed(1)}×</span>
-                                                        <span className="absolute whitespace-nowrap" style={{ left: "33.333%", transform: "translateX(-50%)" }}>1.0× 默认</span>
-                                                        <span className="absolute right-1 whitespace-nowrap">{MINIMAX_SPEED_MAX.toFixed(1)}×</span>
-                                                    </div>
-                                                </div>
-                                                <div className="flex flex-col gap-1 -mt-1">
-                                                    <div className="flex items-center justify-between px-1">
-                                                        <label className="menu-desc">音调 (Pitch)</label>
-                                                        <span className="menu-label font-medium">{config.speechPitch ?? DEFAULT_SPEECH_PITCH}</span>
-                                                    </div>
-                                                    <input
-                                                        type="range"
-                                                        min={MINIMAX_PITCH_MIN}
-                                                        max={MINIMAX_PITCH_MAX}
-                                                        step={MINIMAX_PITCH_STEP}
-                                                        value={config.speechPitch ?? DEFAULT_SPEECH_PITCH}
-                                                        onChange={(e) => updateConfig(config.id, { speechPitch: Number(e.target.value) })}
-                                                        className="w-full accent-black"
-                                                        aria-label="Minimax 音调"
-                                                    />
-                                                    <div className="relative h-4 px-1 text-xs text-gray-500" aria-hidden="true">
-                                                        <span className="absolute left-1 whitespace-nowrap">{MINIMAX_PITCH_MIN}</span>
-                                                        <span className="absolute whitespace-nowrap" style={{ left: "50%", transform: "translateX(-50%)" }}>0 默认</span>
-                                                        <span className="absolute right-1 whitespace-nowrap">+{MINIMAX_PITCH_MAX}</span>
-                                                    </div>
-                                                </div>
+                                                {renderSpeechParamSliders(config)}
                                                 <div className="flex flex-col gap-1 mt-1">
                                                     <label className="menu-desc ml-1">朗读语言</label>
                                                     <select

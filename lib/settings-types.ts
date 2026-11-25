@@ -171,6 +171,8 @@ export type VoiceApiConfig = {
     speechSpeed?: number;
     /** Minimax voice_setting.pitch（半音，±12）。缺省保持旧行为（0，原声）。 */
     speechPitch?: number;
+    /** 情感强度（0–100）。Minimax 按是否 >0 决定是否带上情绪标签；自定义接口透传 emotion_strength。缺省按开启处理。 */
+    emotionStrength?: number;
     customVoices?: { id: string; name: string; createdAt?: number }[];
     enableSTT: boolean;
     enableTTS: boolean;
@@ -327,6 +329,8 @@ export type BindingConfig = {
     /** App-level defaults shared by every character; character app overrides still win. */
     appDefaults?: Partial<Record<string, BindingSlot>>;
     characterBindings: CharacterBinding[];
+    /** 聊天独立 API：设置后聊天默认用它，否则回退到 globalDefaults.apiConfigId（全局默认）。 */
+    chatApiConfigId?: string;
     /** Auxiliary API: used for memory summarization (global, not per-character) */
     memorySummaryApiConfigId?: string;
     /** Auxiliary API: used for embedding/vector recall (global, not per-character) */

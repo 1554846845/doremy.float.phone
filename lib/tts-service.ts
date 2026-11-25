@@ -50,7 +50,7 @@ export async function synthesizeSpeech(
     }
 
     if (provider === "custom") {
-        return synthesizeCustom(text, voiceConfig);
+        return synthesizeCustom(text, voiceConfig, options?.emotion);
     }
 
     return null;
@@ -110,7 +110,9 @@ async function synthesizeMinimax(text: string, config: VoiceApiConfig, emotion?:
         pitch: normalizeMinimaxPitch(config.speechPitch),
     };
     const normalizedEmotion = emotion?.trim().toLowerCase();
-    if (normalizedEmotion && MINIMAX_EMOTIONS.has(normalizedEmotion)) {
+    // 情感强度：0 表示完全中性（不带情绪标签），未设置或 >0 表示允许带情绪。
+    const emotionEnabled = config.emotionStrength === undefined || config.emotionStrength > 0;
+    if (normalizedEmotion && emotionEnabled && MINIMAX_EMOTIONS.has(normalizedEmotion)) {
         voiceSetting.emotion = normalizedEmotion;
     }
 
@@ -219,7 +221,7 @@ async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promis
 // ── 自定义 TTS 接口 ──────────────────────────────────
 // 约定协议：POST {baseUrl}（完整地址），body { text, voice, model? }，
 // 可选 Authorization: Bearer {apiKey}，返回二进制音频。
-async function synthesizeCustom(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+async function synthesizeCustom(text: string, config: VoiceApiConfig, emotion?: string): Promise<Blob | null> {
     const baseUrl = (config.baseUrl || "").trim();
     if (!baseUrl) throw new Error("自定义接口地址未配置");
 
@@ -228,14 +230,23 @@ async function synthesizeCustom(text: string, config: VoiceApiConfig): Promise<B
         headers.Authorization = `Bearer ${config.apiKey}`;
     }
 
+    const body: Record<string, unknown> = {
+        text,
+        voice: config.defaultVoice || "",
+    };
+    if (config.model) body.model = config.model;
+    if (typeof config.speechSpeed === "number" && Number.isFinite(config.speechSpeed)) body.speed = config.speechSpeed;
+    if (typeof config.speechPitch === "number" && Number.isFinite(config.speechPitch)) body.pitch = config.speechPitch;
+    const normalizedEmotion = emotion?.trim();
+    if (normalizedEmotion) body.emotion = normalizedEmotion;
+    if (typeof config.emotionStrength === "number" && Number.isFinite(config.emotionStrength)) {
+        body.emotion_strength = config.emotionStrength;
+    }
+
     const response = await fetchWithTimeout(baseUrl, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-            text,
-            voice: config.defaultVoice || "",
-            ...(config.model ? { model: config.model } : {}),
-        }),
+        body: JSON.stringify(body),
     });
 
     if (!response.ok) {

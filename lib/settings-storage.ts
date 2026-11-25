@@ -1034,6 +1034,7 @@ export function removeApiConfigReferences(apiConfigId: string): void {
     };
     if (config.appDefaults) next.appDefaults = cleanSlotMap(config.appDefaults);
     const auxFields = [
+        "chatApiConfigId",
         "memorySummaryApiConfigId",
         "embeddingApiConfigId",
         "mascotApiConfigId",
@@ -1078,9 +1079,9 @@ export function resolveBinding(
 ): BindingSlot {
     const global = config.globalDefaults;
 
-    // Start with global defaults
+    // Start with global defaults（聊天默认先看独立的 chatApiConfigId，再看全局默认）
     const resolved: BindingSlot = {
-        apiConfigId: global.apiConfigId,
+        apiConfigId: config.chatApiConfigId ?? global.apiConfigId,
         imageConfigId: global.imageConfigId,
         voiceConfigId: global.voiceConfigId,
         presetId: global.presetId,
