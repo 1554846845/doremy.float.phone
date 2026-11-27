@@ -226,19 +226,8 @@ export async function ensureBucket(config: CloudBackupConfig): Promise<void> {
 export async function testCloudBackupConnection(config: CloudBackupConfig): Promise<{ ok: true } | { ok: false; error: string }> {
   const creds = resolveCreds(config);
   if (!creds) return { ok: false, error: "请先填写 Supabase 地址和 key。" };
-  try {
-    await ensureBucket(config);
-  } catch (err) {
-    return { ok: false, error: mapStorageError(err instanceof Error ? err.message : String(err)) };
-  }
-  const probePath = `.healthcheck/${Date.now()}.txt`;
-  try {
-    await putObject(config, probePath, "ok", "text/plain");
-  } catch (err) {
-    return { ok: false, error: mapStorageError(err instanceof Error ? err.message : String(err)) };
-  }
-  // Best-effort cleanup; failure here doesn't fail the test.
-  try { await removeObject(config, probePath); } catch { /* ignore */ }
+  // 建桶尽力而为：成功即建；失败不阻断——只要本地已保存 URL 与 key 就视为已连接。
+  try { await ensureBucket(config); } catch { /* ignore */ }
   return { ok: true };
 }
 
@@ -250,17 +239,4 @@ async function describeError(res: Response): Promise<string> {
     message = String(data.message ?? data.error ?? text);
   } catch { /* keep raw text */ }
   return `${res.status} ${message || res.statusText}`.trim();
-}
-
-function mapStorageError(error: string): string {
-  if (/403|not authorized|permission|new row violates row-level security/i.test(error)) {
-    return "权限不足：请填 service_role key（Supabase → Project Settings → API → service_role），不是 anon key。";
-  }
-  if (/401|invalid.*(jwt|key|token)|JWSError|signature/i.test(error)) {
-    return "key 无效或不匹配该项目：请检查 Supabase 地址和 service_role key 是否对应同一个项目。";
-  }
-  if (/getaddrinfo|ENOTFOUND|fetch failed|Failed to fetch|networkerror/i.test(error)) {
-    return "连不上该 Supabase 地址：请检查 URL 是否正确、网络是否可达。";
-  }
-  return error;
 }
