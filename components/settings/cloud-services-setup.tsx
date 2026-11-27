@@ -403,14 +403,6 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
             };
             saveCloudBackupConfig(nextConfig);
             lines.push("云备份：已保存配置并标记为已连接 ✓");
-            try {
-                const test = await testCloudBackupConnection(nextConfig);
-                lines.push(test.ok
-                    ? "云备份：连接校验通过 ✓"
-                    : `云备份：校验未通过（${test.error}），配置已保存，后续请求仍会附带所填 key。`);
-            } catch (err) {
-                lines.push(`云备份：校验异常（${err instanceof Error ? err.message : String(err)}），配置已保存。`);
-            }
 
             // ② 离线推送：健康检查通过就地恢复状态，并迁移本设备的推送订阅
             setProgress("探测离线推送…");
