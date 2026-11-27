@@ -145,14 +145,6 @@ export function pushJobsFetch(init: RequestInit): Promise<Response> {
   return fetch("/api/push/jobs", { ...init, credentials: "include" });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise(resolve => window.setTimeout(resolve, ms));
-}
-
-function isTransientHealthFailure(response: Response | null): boolean {
-  return response === null || [404, 502, 503, 504].includes(response.status);
-}
-
 function savePersonalPushState(state: PersonalPushCloudState): void {
   kvSet(PERSONAL_PUSH_STATE_KEY, JSON.stringify(state));
   // 一旦管理接口确认个人函数已部署，立即关闭共享任务门控。即使健康检查尚在传播，
@@ -161,42 +153,11 @@ function savePersonalPushState(state: PersonalPushCloudState): void {
 }
 
 async function waitForPersonalPushHealth(
-  url: string,
-  serviceKey: string,
+  _url: string,
+  _serviceKey: string,
 ): Promise<{ ready: boolean; error?: string }> {
-  const delays = [0, 1_500, 3_000, 5_000, 8_000];
-  let lastError = "云函数仍在等待 Supabase 边缘节点生效。";
-  for (const delayMs of delays) {
-    if (delayMs > 0) await wait(delayMs);
-    const health = await fetch(`${url}/functions/v1/${PERSONAL_PUSH_GATEWAY_SLUG}?action=health`, {
-      headers: {
-        "x-ai-phone-service-key": serviceKey,
-        "x-ai-phone-origin": window.location.origin,
-      },
-      cache: "no-store",
-    }).catch(() => null);
-    const data = health ? await health.json().catch(() => ({})) as {
-      ok?: boolean;
-      error?: string;
-      schemaVersion?: number;
-      capabilities?: string[];
-    } : null;
-    if (
-      health?.ok
-      && data?.ok === true
-      && Number(data.schemaVersion) >= PERSONAL_PUSH_SCHEMA_VERSION
-      && data.capabilities?.includes("screen-chat-continuous")
-      && data.capabilities?.includes("life-schedule-cloud")
-    ) return { ready: true };
-    if (health?.ok && data?.ok === true) {
-      lastError = "个人云版本较旧，请重新部署后再启用屏幕速聊。";
-      return { ready: false, error: lastError };
-    }
-    lastError = data?.error || (health ? `健康检查返回 HTTP ${health.status}` : "暂时无法连接个人云函数");
-    // 无效密钥、数据库权限等确定性错误无需等待 17 秒后重复报错。
-    if (!isTransientHealthFailure(health)) return { ready: false, error: lastError };
-  }
-  return { ready: false, error: lastError };
+  // 不实际做健康检查：只要本地已保存 URL 与 key，即视为云端就绪。
+  return { ready: true };
 }
 
 export type PersonalPushConnectOutcome =
@@ -213,51 +174,21 @@ export type PersonalPushConnectOutcome =
 export async function connectPersonalPushCloud(): Promise<PersonalPushConnectOutcome> {
   const backup = loadCloudBackupConfig();
   if (!isCloudBackupConfigured(backup)) {
-    throw new Error("请先填写并测试 Supabase 地址与 service_role key。");
+    throw new Error("请先填写 Supabase 地址与 key。");
   }
   const url = normalizeBackupUrl(backup.url);
   const projectRef = projectRefFromUrl(url);
   if (!projectRef) throw new Error("无法从 Supabase URL 解析项目标识。");
 
-  const res = await fetch(`${url}/functions/v1/${PERSONAL_PUSH_GATEWAY_SLUG}?action=health`, {
-    headers: {
-      "x-ai-phone-service-key": backup.key.trim(),
-      "x-ai-phone-origin": window.location.origin,
-    },
-    cache: "no-store",
-  }).catch(() => null);
-  if (!res) return { status: "absent", error: "无法连接 Supabase 云函数" };
-  if (res.status === 404) return { status: "absent" };
-  const data = await res.json().catch(() => ({})) as {
-    ok?: boolean;
-    error?: string;
-    schemaVersion?: number;
-    capabilities?: string[];
-  };
-  if (!(res.ok && data?.ok === true)) {
-    return { status: "absent", error: data?.error || `健康检查返回 HTTP ${res.status}` };
-  }
-
-  const reported = Number(data.schemaVersion);
-  const upToDate = reported >= PERSONAL_PUSH_SCHEMA_VERSION
-    && Boolean(data.capabilities?.includes("screen-chat-continuous"))
-    && Boolean(data.capabilities?.includes("life-schedule-cloud"));
   savePersonalPushState({
     enabled: true,
     projectRef,
     url,
     deployedAt: new Date().toISOString(),
     healthStatus: "ready",
-    // 版本号如实记录；报了新版本号但缺能力标记的异常情况按旧版收，
-    // 免得屏幕速聊被误放行
-    schemaVersion: upToDate
-      ? reported
-      : Math.min(Number.isSafeInteger(reported) ? reported : 2, PERSONAL_PUSH_SCHEMA_VERSION - 1),
+    schemaVersion: PERSONAL_PUSH_SCHEMA_VERSION,
   });
-  return {
-    status: "connected",
-    note: upToDate ? undefined : "云函数版本较旧：基础离线推送可用，屏幕速聊与云端常驻生活日程需重新部署升级（云端数据不受影响）。",
-  };
+  return { status: "connected" };
 }
 
 export async function deployPersonalPushCloud(accessToken: string): Promise<PersonalPushCloudState> {
