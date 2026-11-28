@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
 import { getCurrentAccount } from "@/lib/server/account-auth";
 import { broadcastShellNotify, getOrCreateVapidConfig } from "@/lib/server/push-service";
 import { encodeSupabaseFilter, getSupabaseServerConfig, supabaseRestFetch } from "@/lib/server/supabase-rest";
@@ -43,23 +44,23 @@ export async function GET(request: Request) {
       key: "site",
       label: "站点 Supabase 配置",
       status: "fail",
-      detail: "缺少 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY。",
-      hint: "在部署平台环境变量里补齐后重新部署。",
+      detail: "缺少 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY：网站服务器自己没有数据库钥匙。",
+      hint: "到部署平台（Vercel：Settings → Environment Variables）添加这两项，指向离线推送部署的那个 Supabase 项目，然后必须重新部署一次（旧构建不会带上新变量）。",
     });
     return NextResponse.json({ ok: false, steps, summary: "站点未配置 Supabase，后续步骤无法进行。" });
   }
   steps.push({ key: "site", label: "站点 Supabase 配置", status: "ok", detail: `已配置：${supabase.url}` });
 
-  // NEXT_PUBLIC_SELF_HOSTED_MODE 是构建期注入，服务端读到的就是打包时的值。
-  const selfHosted = process.env.NEXT_PUBLIC_SELF_HOSTED_MODE === "true";
+  // 单机模式现在由 lib/self-hosting.ts 固定开启，不再依赖构建期环境变量；
+  // 这里如实报告它的实际取值，而不是去读一个可能根本没设的变量。
+  const selfHosted = isSelfHostedModeEnabled();
   steps.push({
     key: "mode",
     label: "单机模式开关",
     status: selfHosted ? "ok" : "fail",
     detail: selfHosted
-      ? "NEXT_PUBLIC_SELF_HOSTED_MODE=true，离线任务接口已开放。"
+      ? "单机模式内置开启，/api/push/jobs 与 /api/push/outbox 已开放。"
       : "/api/push/jobs 与 /api/push/outbox 会直接返回 503，任务永远建不起来。",
-    hint: selfHosted ? undefined : "设为 true 后必须重新部署（该变量是构建期注入，改完不部署不生效）。",
   });
 
   // ── ② 账号身份 ──
