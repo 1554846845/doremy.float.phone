@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 
 import webpush from "web-push";
 
-import { encodeSupabaseFilter, getSupabaseServerConfig, supabaseRestFetch } from "./supabase-rest";
+import { encodeSupabaseFilter, getSupabaseServerConfig, supabaseAuthHeaders, supabaseRestFetch } from "./supabase-rest";
 
 type VapidKeys = { publicKey: string; privateKey: string };
 
@@ -53,8 +53,7 @@ export async function broadcastShellNotify(
     const response = await fetch(`${config.url}/realtime/v1/api/broadcast`, {
       method: "POST",
       headers: {
-        apikey: config.key,
-        Authorization: `Bearer ${config.key}`,
+        ...supabaseAuthHeaders(config.key),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

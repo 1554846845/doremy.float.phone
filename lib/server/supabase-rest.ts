@@ -14,6 +14,18 @@ export function getSupabaseServerConfig(): SupabaseConfig | null {
   return { url: url.replace(/\/$/, ""), key };
 }
 
+/**
+ * Supabase 的两代密钥用法不同，混用会得到 `401 Invalid API key`：
+ * - 老式 JWT（`eyJ…`）要在 `apikey` 和 `Authorization: Bearer` 里各放一次；
+ * - 新版 `sb_secret_…` / `sb_publishable_…` 不是 JWT，只能放 `apikey`，
+ *   再塞进 `Authorization` 会被当成一个解不开的 JWT 直接拒掉。
+ */
+export function supabaseAuthHeaders(key: string): Record<string, string> {
+  const headers: Record<string, string> = { apikey: key };
+  if (!key.startsWith("sb_")) headers.Authorization = `Bearer ${key}`;
+  return headers;
+}
+
 export function formatSupabaseRestError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const cause = err instanceof Error && "cause" in err ? String((err as { cause?: unknown }).cause ?? "") : "";
@@ -37,8 +49,7 @@ export async function supabaseRestFetch<T>(
   const response = await fetch(`${config.url}/rest/v1/${path}`, {
     ...init,
     headers: {
-      apikey: config.key,
-      Authorization: `Bearer ${config.key}`,
+      ...supabaseAuthHeaders(config.key),
       "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
 import { getCurrentAccount } from "@/lib/server/account-auth";
 import { broadcastShellNotify, getOrCreateVapidConfig } from "@/lib/server/push-service";
-import { encodeSupabaseFilter, getSupabaseServerConfig, supabaseRestFetch } from "@/lib/server/supabase-rest";
+import { encodeSupabaseFilter, getSupabaseServerConfig, supabaseAuthHeaders, supabaseRestFetch } from "@/lib/server/supabase-rest";
 
 /**
  * 离线推送全链路自检。
@@ -101,7 +101,7 @@ function describeServerKey(url: string, key: string): { ok: boolean; detail: str
 async function probeServerKey(url: string, key: string): Promise<{ ok: boolean; detail: string }> {
   try {
     const response = await fetch(`${url}/rest/v1/push_server_config?select=id&limit=1`, {
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      headers: supabaseAuthHeaders(key),
       cache: "no-store",
     });
     const body = (await response.text().catch(() => "")).slice(0, 200);
