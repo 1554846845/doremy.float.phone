@@ -26,7 +26,9 @@ jobs:
       SHELL_KEYSTORE_PASSWORD: ${{ secrets.SHELL_KEYSTORE_PASSWORD }}
       SHELL_KEY_ALIAS: ${{ secrets.SHELL_KEY_ALIAS }}
       SHELL_KEY_PASSWORD: ${{ secrets.SHELL_KEY_PASSWORD }}
-      SHELL_SITE_URL: ${{ inputs.site_url || vars.SHELL_SITE_URL }}
+      # 个人自部署：未手动填写 site_url、仓库也没设 Variables 时，回退到我们自己的站点，
+      # 避免 APK 打到默认的 https://example.invalid 导致白屏。
+      SHELL_SITE_URL: ${{ inputs.site_url || vars.SHELL_SITE_URL || 'https://doremy-float-phone-six.vercel.app' }}
     steps:
       - uses: actions/checkout@v4
 
