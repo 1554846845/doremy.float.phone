@@ -50,10 +50,22 @@ function describeServerKey(url: string, key: string): { ok: boolean; detail: str
   }
   let projectRef = "";
   try { projectRef = new URL(url).hostname.split(".")[0] || ""; } catch { /* URL 已在上一步校验过 */ }
+  const innerWhitespace = trimmed.search(/\s/);
+  if (innerWhitespace >= 0) {
+    ok = false;
+    notes.push(`⚠️ 第 ${innerWhitespace + 1} 位夹了空白或换行（复制时被折行，密钥中间断开）`);
+  }
+  const illegal = trimmed.replace(/[A-Za-z0-9_.-]/g, "");
+  if (illegal.length > 0) {
+    ok = false;
+    notes.push(`⚠️ 含 ${illegal.length} 个不属于密钥的字符（引号、中文标点之类）`);
+  }
+  const parts = trimmed.split(".");
+  notes.push(`按「.」切成 ${parts.length} 段（正常 JWT 是 3 段）`);
   if (trimmed.startsWith("eyJ")) {
     try {
       const payload = JSON.parse(
-        Buffer.from(trimmed.split(".")[1] ?? "", "base64url").toString("utf8"),
+        Buffer.from(parts[1] ?? "", "base64url").toString("utf8"),
       ) as { role?: string; ref?: string };
       notes.push(`格式 JWT，role=${payload.role ?? "?"}，所属项目=${payload.ref ?? "?"}`);
       if (payload.role !== "service_role") {
@@ -66,7 +78,7 @@ function describeServerKey(url: string, key: string): { ok: boolean; detail: str
       }
     } catch {
       ok = false;
-      notes.push("⚠️ JWT 解不开，密钥多半被复制残缺了（少了结尾一段）");
+      notes.push("⚠️ JWT 第二段解不出 JSON，密钥多半被复制残缺了");
     }
   } else if (trimmed.startsWith("sb_secret_")) {
     notes.push("格式：新版 secret key");
@@ -78,6 +90,34 @@ function describeServerKey(url: string, key: string): { ok: boolean; detail: str
     notes.push("⚠️ 既不是 eyJ… 也不是 sb_secret_…，多半不是这个项目的密钥");
   }
   return { ok, detail: notes.join("；") };
+}
+
+/**
+ * 直接拿站点这把密钥去问 Supabase 一次，把「密钥不对」和「表没建」彻底分开。
+ *
+ * 这一步取代了所有猜测：401 就是密钥本身不被接受；404/schema cache 说明密钥是好的、
+ * 只是建表脚本没跑成功；200 则两者都对。只读一条 `id`，不改任何数据。
+ */
+async function probeServerKey(url: string, key: string): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const response = await fetch(`${url}/rest/v1/push_server_config?select=id&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      cache: "no-store",
+    });
+    const body = (await response.text().catch(() => "")).slice(0, 200);
+    if (response.ok) {
+      return { ok: true, detail: `直连测试通过（HTTP ${response.status}）：密钥有效，push_server_config 表存在。` };
+    }
+    if (response.status === 401 || /Invalid API key/i.test(body)) {
+      return { ok: false, detail: `Supabase 直接回了 HTTP ${response.status}「Invalid API key」——它不接受这把密钥本身，与表无关。` };
+    }
+    if (/PGRST205|does not exist|schema cache/i.test(body)) {
+      return { ok: false, detail: `密钥有效，但 push_server_config 表不存在（HTTP ${response.status}）——建表 SQL 没跑成功。` };
+    }
+    return { ok: false, detail: `HTTP ${response.status}：${body}` };
+  } catch (error) {
+    return { ok: false, detail: `直连 Supabase 失败：${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 export async function GET(request: Request) {
@@ -108,7 +148,16 @@ export async function GET(request: Request) {
     detail: keyCheck.detail,
     hint: keyCheck.ok
       ? undefined
-      : "到 Supabase → Project Settings → API Keys，整串重新复制 service_role（secret）那个，整串替换 Vercel 里 SUPABASE_SERVICE_ROLE_KEY 的值（不要把首尾空白带进去），然后 Redeploy。",
+      : "到 Supabase → Project Settings → API Keys，点 service_role（secret）右侧的 Copy 按钮整串复制（不要手动框选），整串替换 Vercel 里 SUPABASE_SERVICE_ROLE_KEY 的值，然后 Redeploy。",
+  });
+
+  const keyProbe = await probeServerKey(supabase.url, supabase.key);
+  steps.push({
+    key: "probe",
+    label: "直连 Supabase 测试",
+    status: keyProbe.ok ? "ok" : "fail",
+    detail: keyProbe.detail,
+    hint: keyProbe.ok ? undefined : "这一项最权威：它直接用站点里的密钥访问了一次你的项目，返回什么就是 Supabase 的真实态度。",
   });
 
   // 单机模式现在由 lib/self-hosting.ts 固定开启，不再依赖构建期环境变量；
