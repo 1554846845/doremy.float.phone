@@ -305,6 +305,7 @@ export async function GET(request: Request) {
   const failed = steps.filter(step => step.status === "fail");
   return NextResponse.json({
     ok: failed.length === 0,
+    build: "marker-2026-11-28-1952",
     steps,
     summary: failed.length === 0
       ? "各段均通过。若仍收不到消息，问题在客户端触发或系统通知权限。"
