@@ -25,7 +25,7 @@ import { executeCustomAppToolCall } from "./custom-app-tool-runtime";
 import { executeLifeToolCall } from "./life/life-tools";
 import { appendLifeTimelineEntry, loadVirtualLifeState, saveVirtualLifeState } from "./life/life-storage";
 import { characterWorkspace, agentComputerRequest, isAgentComputerConfigured } from "./agent-computer";
-import { AGENT_COMPUTER_CAPABILITY_ID, CHECK_IN_REQUEST_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, DEVICE_ACTION_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, PHOTO_WALL_CAPABILITY_ID, PERCEPTION_READ_CAPABILITY_ID, PHONE_WIDGET_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, SYSTEM_CALENDAR_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
+import { AGENT_COMPUTER_CAPABILITY_ID, CHECK_IN_REQUEST_CAPABILITY_ID, CALENDAR_MANAGEMENT_CAPABILITY_ID, DEVICE_ACTION_CAPABILITY_ID, GENERATE_LOCAL_FILE_CAPABILITY_ID, LOCAL_DATA_LIBRARY_CAPABILITY_ID, MEMORY_WRITE_CAPABILITY_ID, MUSIC_CONTROL_CAPABILITY_ID, NOTE_WALL_CAPABILITY_ID, PHOTO_WALL_CAPABILITY_ID, PERCEPTION_READ_CAPABILITY_ID, PHONE_WIDGET_CAPABILITY_ID, REALITY_BRIDGE_CAPABILITY_ID, SEND_FILE_CAPABILITY_ID, SYSTEM_CALENDAR_CAPABILITY_ID, TIMED_WAKE_CAPABILITY_ID, TOOLBOX_MANAGEMENT_CAPABILITY_ID, getInternalCapability } from "./internal-capability-storage";
 import { createPhotoWallId, loadPhotoWallState, savePhotoWallState, type PhotoWallDoodle, type PhotoWallCreationRecord, type PhotoWallPhoto } from "./photo-wall-storage";
 import { generateImageFromConfiguredApi } from "./image-generation-service";
 import {
@@ -870,6 +870,7 @@ async function executeInternalTool(call: ToolCall, context?: ToolExecutionContex
     if (isLocalDataToolName(call.name)) return executeLocalDataTool(call);
     if (isToolboxManagementToolName(call.name)) return executeToolboxManagementTool(call);
     if (call.name === "发送文件") return executeSendFileTool(call);
+    if (call.name === "生成本地文件") return executeGenerateLocalFileTool(call);
     if (call.name === "角色电脑") return executeAgentComputerTool(call, context);
     // 内置工具必须排在用户自定义的现实桥动作**之前**：
     // 用户完全可能把快捷动作也命名成「查看手机状态」，若让现实桥先匹配，
@@ -2966,6 +2967,84 @@ async function executeSendFileTool(call: ToolCall): Promise<ToolResult> {
         continueConversation: true,
         persistToHistory: false,
         mediaAttachments: [{ type: resolvedType, url: finalUrl, title: title || undefined }],
+    };
+}
+
+// ── Generate Local File Tool ─────────────────────
+
+const TEXT_FILE_MIME: Record<string, string> = {
+    ".css": "text/css",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".json": "application/json",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".ts": "text/plain",
+    ".csv": "text/csv",
+    ".xml": "application/xml",
+    ".yaml": "text/yaml",
+    ".yml": "text/yaml",
+    ".py": "text/x-python",
+    ".sh": "text/x-sh",
+    ".svg": "image/svg+xml",
+};
+
+function mimeForFilename(filename: string): string {
+    const ext = (filename.toLowerCase().match(/\.[a-z0-9]+$/) || [".txt"])[0];
+    return TEXT_FILE_MIME[ext] || "text/plain";
+}
+
+function sanitizeFilename(filename: string): string {
+    // 去掉路径/非法字符，避免路径穿越或无法下载的文件名；扩展名仅保留一次
+    const cleaned = filename.replace(/[\\/:*?"<>|]+/g, "_").trim();
+    const base = cleaned.replace(/\.[a-z0-9]+$/i, "") || "file";
+    const extMatch = filename.match(/\.[a-z0-9]+$/i);
+    const ext = extMatch ? extMatch[0] : ".txt";
+    return `${base}${ext}`;
+}
+
+async function executeGenerateLocalFileTool(call: ToolCall): Promise<ToolResult> {
+    const capability = getInternalCapability(GENERATE_LOCAL_FILE_CAPABILITY_ID);
+    if (!capability || !capability.enabled || capability.mode === "off") {
+        return { name: call.name, success: false, error: "生成本地文件能力未启用", continueConversation: false, persistToHistory: false };
+    }
+
+    const args = call.args || {};
+    const rawFilename = typeof args.filename === "string" ? args.filename.trim() : "";
+    const content = typeof args.content === "string" ? args.content : "";
+
+    if (!rawFilename) {
+        return { name: call.name, success: false, error: "缺少文件名 (filename)", continueConversation: false };
+    }
+    if (!content) {
+        return { name: call.name, success: false, error: "缺少文件内容 (content)", continueConversation: false };
+    }
+
+    const filename = sanitizeFilename(rawFilename);
+    const mime = mimeForFilename(filename);
+    const blob = new Blob([content], { type: mime });
+
+    let ref: string;
+    try {
+        ref = await storeMediaBlob(blob, mime, "file");
+    } catch (err) {
+        return {
+            name: call.name,
+            success: false,
+            error: `文件写入失败：${err instanceof Error ? err.message : String(err)}`,
+            continueConversation: false,
+        };
+    }
+
+    return {
+        name: call.name,
+        success: true,
+        data: `已生成本地文件：${filename}`,
+        continueConversation: true,
+        persistToHistory: false,
+        mediaAttachments: [{ type: "file", url: ref, title: filename }],
     };
 }
 

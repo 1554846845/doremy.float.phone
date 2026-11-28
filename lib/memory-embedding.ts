@@ -4,6 +4,7 @@
 import type { ApiConfig } from "./settings-types";
 import type { MemoryEntry, MemorySearchResult } from "./memory-types";
 import { determineBaseUrl, buildRequestHeaders } from "./api-helpers";
+import { pushApiLog } from "./api-log-store";
 
 // ── Provider → Embedding Model Mapping ──
 
@@ -69,15 +70,49 @@ export async function generateEmbedding(
             }),
         });
         if (!res.ok) {
-            return fail(`API 错误 ${res.status}: ${await res.text()}`);
+            const errText = await res.text().catch(() => "");
+            pushApiLog({
+                source: "background",
+                endpoint: "检索:embedding",
+                model: embeddingModel,
+                messages: [{ role: "system", content: text.slice(0, 2000) }],
+                rawResponse: `[API 错误 ${res.status}] ${errText.slice(0, 2000)}`,
+                statusCode: res.status,
+                error: errText.slice(0, 2000),
+            });
+            return fail(`API 错误 ${res.status}: ${errText}`);
         }
         const data = await res.json();
         const embedding = data?.data?.[0]?.embedding;
         if (!Array.isArray(embedding) || embedding.length === 0) {
+            pushApiLog({
+                source: "background",
+                endpoint: "检索:embedding",
+                model: embeddingModel,
+                messages: [{ role: "system", content: text.slice(0, 2000) }],
+                rawResponse: "接口未返回向量数据",
+                error: "接口未返回向量数据",
+            });
             return fail("接口未返回向量数据");
         }
+        pushApiLog({
+            source: "background",
+            endpoint: "检索:embedding",
+            model: embeddingModel,
+            messages: [{ role: "system", content: text.slice(0, 2000) }],
+            rawResponse: `返回 ${embedding.length} 维向量`,
+        });
         return embedding;
     } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        pushApiLog({
+            source: "background",
+            endpoint: "检索:embedding",
+            model: embeddingModel,
+            messages: [{ role: "system", content: text.slice(0, 2000) }],
+            rawResponse: `[请求失败] ${message}`,
+            error: message,
+        });
         if (options.throwOnError) throw err;
         console.warn("[MemoryEmbedding] fetch error:", err);
         return null;

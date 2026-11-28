@@ -179,6 +179,12 @@ const DEFAULT_OPENAI_VOICES = [
     { id: "shimmer", name: "Shimmer" },
 ];
 
+const FISH_AUDIO_MODELS = [
+    { id: "speech-1.5", name: "speech-1.5" },
+    { id: "speech-1.6", name: "speech-1.6" },
+    { id: "s1", name: "s1" },
+];
+
 type VoiceOption = { id: string; name: string; createdAt?: number };
 
 function uniqueOptions(options: VoiceOption[]): VoiceOption[] {
@@ -198,7 +204,7 @@ function defaultVoiceOptions(provider: string): VoiceOption[] {
 
 function defaultVoicePlaceholder(provider: string): string {
     if (provider === "OpenAI") return "alloy";
-    if (provider === "FishAudio") return "Fish Audio 音色 ID";
+    if (provider === "FishAudio") return "reference_id (Voice ID)，如 7f92f8afb8ec43bf81429cc1c9199cb1";
     if (provider === "custom") return "音色 ID";
     return "male-qn-qingse 或克隆 Voice ID";
 }
@@ -343,10 +349,10 @@ export function VoiceSettings() {
             updateConfig(id, {
                 provider: "FishAudio",
                 baseUrl: "https://api.fish.audio",
-                model: undefined,
+                model: "speech-1.5",
                 defaultVoice: "",
             });
-            setManualModelIds(prev => ({ ...prev, [id]: true }));
+            setManualModelIds(prev => ({ ...prev, [id]: false }));
             setManualVoiceIds(prev => ({ ...prev, [id]: true }));
             return;
         }
@@ -870,7 +876,49 @@ export function VoiceSettings() {
                                                         onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
                                                         placeholder="https://api.fish.audio"
                                                     />
-                                                    <span className="menu-desc ml-1">留空默认使用官方地址，音色 ID 填在下方「默认音色」</span>
+                                                    <span className="menu-desc ml-1">留空默认使用官方地址；因官方接口不开放跨域，请求会走服务端代理</span>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="menu-desc ml-1">语音模型 (TTS Model)</label>
+                                                    <div className="flex flex-col gap-2">
+                                                        {manualModelIds[config.id] ? (
+                                                            <div className="flex gap-2">
+                                                                <Input
+                                                                    type="text"
+                                                                    value={config.model || ""}
+                                                                    onChange={(e) => updateConfig(config.id, { model: e.target.value })}
+                                                                    placeholder="手动输入模型 ID"
+                                                                    className="flex-1"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setManualModelIds(prev => ({ ...prev, [config.id]: false }))}
+                                                                    className="ui-icon-btn"
+                                                                    aria-label="返回模型下拉选择"
+                                                                    title="返回模型下拉选择"
+                                                                >
+                                                                    <List size={20} />
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <select
+                                                                value={FISH_AUDIO_MODELS.some(m => m.id === config.model) ? config.model : "__manual__"}
+                                                                onChange={(e) => {
+                                                                    if (e.target.value === "__manual__") {
+                                                                        setManualModelIds(prev => ({ ...prev, [config.id]: true }));
+                                                                        return;
+                                                                    }
+                                                                    updateConfig(config.id, { model: e.target.value });
+                                                                }}
+                                                                className="ui-select"
+                                                            >
+                                                                {FISH_AUDIO_MODELS.map(model => (
+                                                                    <option key={model.id} value={model.id}>{model.name}</option>
+                                                                ))}
+                                                                <option value="__manual__">手动输入...</option>
+                                                            </select>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 {renderSpeechParamSliders(config)}
                                                 <span className="menu-desc ml-1">Fish Audio 官方接口不支持语速/音调/情感强度，以上参数仅作保存</span>
@@ -955,10 +1003,10 @@ export function VoiceSettings() {
                                         )}
 
                                         <div className="flex flex-col gap-1">
-                                            <label className="menu-desc ml-1">默认音色 (Default Voice) 或 自定义 Voice ID</label>
+                                            <label className="menu-desc ml-1">{config.provider === "FishAudio" ? "Voice ID (reference_id)" : "默认音色 (Default Voice) 或 自定义 Voice ID"}</label>
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex gap-2">
-                                                    {manualVoiceIds[config.id] ? (
+                                                    {(manualVoiceIds[config.id] || config.provider === "FishAudio" || config.provider === "custom") ? (
                                                         <>
                                                             <Input
                                                                 type="text"
@@ -967,15 +1015,17 @@ export function VoiceSettings() {
                                                                 placeholder={defaultVoicePlaceholder(config.provider)}
                                                                 className="flex-1"
                                                             />
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setManualVoiceIds(prev => ({ ...prev, [config.id]: false }))}
-                                                                className="ui-icon-btn"
-                                                                aria-label="返回音色下拉选择"
-                                                                title="返回音色下拉选择"
-                                                            >
-                                                                <List size={20} />
-                                                            </button>
+                                                            {(config.provider === "Minimax" || config.provider === "OpenAI") && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setManualVoiceIds(prev => ({ ...prev, [config.id]: false }))}
+                                                                    className="ui-icon-btn"
+                                                                    aria-label="返回音色下拉选择"
+                                                                    title="返回音色下拉选择"
+                                                                >
+                                                                    <List size={20} />
+                                                                </button>
+                                                            )}
                                                         </>
                                                     ) : (
                                                         (() => {

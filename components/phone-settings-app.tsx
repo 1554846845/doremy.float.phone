@@ -9,6 +9,7 @@ import { changeAccountPassword } from "@/lib/account-client";
 import { ApiSettings } from "./settings/api-settings";
 import { ApiAssignment } from "./settings/api-assignment";
 import { VoiceSettings } from "./settings/voice-settings";
+import { ApiLogPanel } from "./settings/api-log-panel";
 import { ImageGenerationSettings } from "./settings/image-generation-settings";
 import { PresetManager } from "./settings/preset-manager";
 import { WorldBookManager } from "./settings/worldbook-manager";
@@ -57,6 +58,7 @@ type SubPage =
     | "api"
     | "apiAssignment"
     | "voice"
+    | "apiLog"
     | "imageGeneration"
     | "presets"
     | "worldbook"
@@ -84,6 +86,7 @@ const SETTINGS_MENU = [
     { id: "api", icon: HardDrive, label: "API 设置", desc: "大模型接口", iconColor: BINDING_ACCENTS.api , glass: "api" },
     { id: "apiAssignment", icon: SlidersHorizontal, label: "API 分配", desc: "聊天 / 记忆总结 / 记忆检索各自选全局或独立 API", iconColor: BINDING_ACCENTS.memory , glass: "api" },
     { id: "voice", icon: Mic, label: "语音 API", desc: "语音合成", iconColor: BINDING_ACCENTS.voice , glass: "voice" },
+    { id: "apiLog", icon: FileText, label: "API 运行与报错日志", desc: "聊天 / 总结 / 检索 / TTS 请求记录", iconColor: BINDING_ACCENTS.api , glass: "api" },
     { id: "imageGeneration", icon: Image, label: "图像生成 API", desc: "模型、参考图与提示词", iconColor: CONTENT_APP_ACCENTS.moments , glass: "image-generation" },
     { id: "presets", icon: Fingerprint, label: "预设", desc: "角色预设", iconColor: BINDING_ACCENTS.preset , glass: "presets" },
     { id: "worldbook", icon: Globe, label: "世界书", desc: "世界观设定", iconColor: BINDING_ACCENTS.worldBook , glass: "worldbook" },
@@ -334,6 +337,8 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                 return <ApiAssignment />;
             case "voice":
                 return <VoiceSettings />;
+            case "apiLog":
+                return <ApiLogPanel />;
             case "imageGeneration":
                 return <ImageGenerationSettings />;
             case "presets":
@@ -513,7 +518,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                         <CardGrid
                             label="API Config"
                             labelClassName="settings-menu-section-title"
-                            items={SETTINGS_MENU.filter(item => ["api", "apiAssignment", "voice"].includes(item.id)).map(makeCardItem)}
+                            items={SETTINGS_MENU.filter(item => ["api", "apiAssignment", "voice", "apiLog"].includes(item.id)).map(makeCardItem)}
                         />
                         <div className="settings-data-rules-section">
                             <h3 className="settings-menu-section-title">Data & Rules</h3>

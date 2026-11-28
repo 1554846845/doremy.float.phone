@@ -2,6 +2,7 @@
 
 import type { VoiceApiConfig, ContentAppId } from "./settings-types";
 import { loadVoiceConfigs, loadBindingConfig, resolveBinding } from "./settings-storage";
+import { pushApiLog } from "./api-log-store";
 
 export type VoiceApiConfigResolved = VoiceApiConfig;
 
@@ -28,6 +29,11 @@ export function resolveVoiceConfig(characterId: string, appId?: ContentAppId): V
  * - FishAudio: REST API → binary audio blob
  * - custom: 用户自定义接口 → binary audio blob
  */
+function extractHttpStatus(message: string): number | undefined {
+    const match = message.match(/\b(\d{3})\b/);
+    return match ? Number(match[1]) : undefined;
+}
+
 export async function synthesizeSpeech(
     text: string,
     voiceConfig: VoiceApiConfig,
@@ -36,24 +42,43 @@ export async function synthesizeSpeech(
     if (!text.trim()) return null;
 
     const provider = voiceConfig.provider;
+    const endpoint = `TTS:${provider || "unknown"}`;
+    const model = voiceConfig.model || "";
+    const logMessage = { role: "system" as const, content: text.slice(0, 4000) };
+    const writeLog = (ok: boolean, opts?: { statusCode?: number; error?: string; blob?: Blob | null }) => {
+        pushApiLog({
+            source: "background",
+            endpoint,
+            model,
+            messages: [logMessage],
+            rawResponse: ok
+                ? `合成成功（${opts?.blob?.size ?? 0} 字节）`
+                : `[失败] ${opts?.error || ""}`,
+            ...(opts?.statusCode !== undefined ? { statusCode: opts.statusCode } : {}),
+            ...(opts?.error ? { error: opts.error.slice(0, 2000) } : {}),
+        });
+    };
 
-    if (provider === "Minimax") {
-        return synthesizeMinimax(text, voiceConfig, options?.emotion);
+    try {
+        let blob: Blob | null = null;
+        if (provider === "Minimax") {
+            blob = await synthesizeMinimax(text, voiceConfig, options?.emotion);
+        } else if (provider === "OpenAI") {
+            blob = await synthesizeOpenAI(text, voiceConfig);
+        } else if (provider === "FishAudio") {
+            blob = await synthesizeFishAudio(text, voiceConfig);
+        } else if (provider === "custom") {
+            blob = await synthesizeCustom(text, voiceConfig, options?.emotion);
+        } else {
+            return null;
+        }
+        writeLog(Boolean(blob), { blob, ...(!blob ? { error: "未返回音频" } : {}) });
+        return blob;
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        writeLog(false, { statusCode: extractHttpStatus(message), error: message });
+        throw e;
     }
-
-    if (provider === "OpenAI") {
-        return synthesizeOpenAI(text, voiceConfig);
-    }
-
-    if (provider === "FishAudio") {
-        return synthesizeFishAudio(text, voiceConfig);
-    }
-
-    if (provider === "custom") {
-        return synthesizeCustom(text, voiceConfig, options?.emotion);
-    }
-
-    return null;
 }
 
 // A stalled TTS request (TCP connected but no response — cold start, rate-limit
@@ -195,23 +220,28 @@ async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promis
     if (!config.apiKey) throw new Error("Fish Audio API Key 未配置");
     if (!config.defaultVoice) throw new Error("Fish Audio 音色 ID (Voice ID) 未配置");
 
-    const baseUrl = (config.baseUrl || "https://api.fish.audio").replace(/\/$/, "");
-    const response = await fetchWithTimeout(`${baseUrl}/v1/tts`, {
+    const model = config.model || "speech-1.5";
+    // Fish Audio 官方接口不开放 CORS，浏览器/安卓 WebView 直连 https://api.fish.audio
+    // 会被跨域拦截。统一走服务端代理 /api/voice/fish-tts，由服务端转发并回传二进制音频。
+    const response = await fetchWithTimeout("/api/voice/fish-tts", {
         method: "POST",
         headers: {
-            Authorization: `Bearer ${config.apiKey}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify({
             text,
             reference_id: config.defaultVoice,
+            model,
             format: "mp3",
+            apiKey: config.apiKey,
+            baseUrl: config.baseUrl || "https://api.fish.audio",
         }),
     });
 
     if (!response.ok) {
-        const errText = await response.text().catch(() => "");
-        throw new Error(`Fish Audio TTS 请求失败 (${response.status}): ${errText}`);
+        const err = await response.json().catch(() => ({})) as { message?: string; error?: string };
+        const message = err.message || err.error || `HTTP ${response.status}`;
+        throw new Error(`Fish Audio TTS 请求失败: ${message}`);
     }
 
     const blob = await response.blob();

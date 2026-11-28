@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    Clapperboard, Smartphone, Sparkles, Play, Square, Heart, Send,
-    Plus, X, Settings2, Moon, Sun, BookMarked, Link2, PenLine, Gift,
+    Clapperboard, Smartphone, Sparkles, Play, Send,
+    Plus, X, Settings2, Moon, Sun, Link2, PenLine, Gift,
 } from "lucide-react";
 import { Toggle } from "@/components/ui/form";
 import { loadCharacters } from "@/lib/character-storage";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/theater-storage";
 import { generateTheaterStoryStream, generateTheaterInspiration, continueTheaterStory, generateDailyQuestion, applyForbiddenWords } from "@/lib/theater-engine";
 import { sendBrowserNotification } from "@/lib/browser-notification";
+import { TheaterReader } from "@/components/theater/theater-reader";
 
 type Tab = "theater" | "pickup";
 
@@ -54,11 +55,6 @@ const STYLE = `
   font-family:inherit; letter-spacing:1px; }
 .tt-btn[data-ghost="true"] { background:transparent; color:var(--tt-ink); }
 .tt-btn:disabled { opacity:.4; cursor:not-allowed; }
-.tt-output { border:1px solid var(--tt-line); padding:16px 16px; min-height:180px; white-space:pre-wrap;
-  word-break:break-word; font-size:14px; line-height:1.9; }
-.tt-cursor { display:inline-block; width:8px; height:16px; background:var(--tt-ink); vertical-align:text-bottom;
-  animation:ttblink 1s steps(2,start) infinite; }
-@keyframes ttblink { to { visibility:hidden; } }
 .tt-toolbar { display:flex; flex-wrap:wrap; gap:8px; }
 .tt-footer { border-top:2px solid var(--tt-ink); margin-top:6px; padding-top:12px; display:flex; flex-direction:column; gap:10px; }
 .tt-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -68,6 +64,11 @@ const STYLE = `
 .tt-note-date { font-size:10px; letter-spacing:1px; color:var(--tt-muted); margin-top:6px; }
 .tt-dialog-back { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:200; }
 .tt-dialog { background:var(--tt-paper); color:var(--tt-ink); border:1px solid var(--tt-line); width:min(92vw,460px); padding:18px; display:flex; flex-direction:column; gap:12px; }
+.tt-error { display:flex; align-items:flex-start; gap:8px; padding:10px 12px; border:1px solid #c2410c;
+  background:#fff1f2; color:#c2410c; font-size:12.5px; line-height:1.6; word-break:break-word; }
+.tt[data-dark="true"] .tt-error { border-color:#fca5a5; background:#2a1214; color:#fca5a5; }
+.tt-error span { flex:1; min-width:0; }
+.tt-error button { flex:0 0 auto; border:none; background:transparent; color:inherit; cursor:pointer; font-size:15px; padding:0 2px; }
 `;
 
 export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
@@ -88,6 +89,12 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
     const [generating, setGenerating] = useState(false);
     const [currentStory, setCurrentStory] = useState<TheaterStory | null>(null);
     const abortRef = useRef<AbortController | null>(null);
+
+    // 独立剧情阅读页：点「开始生成」后跳转过去流式渲染，不再挤在配置表单里。
+    const [view, setView] = useState<"form" | "reader">("form");
+    const [readerTitle, setReaderTitle] = useState("");
+    const [error, setError] = useState<string | null>(null);
+    const [readerSaved, setReaderSaved] = useState(false);
 
     // 小纸条 / 每日一问
     const [noteOpen, setNoteOpen] = useState(false);
@@ -132,9 +139,14 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
     const runGenerate = async (withIdea?: string) => {
         if (generating) return;
         const kind: TheaterStoryKind = tab;
+        const title = (withIdea ?? idea).trim().slice(0, 24) || "未命名";
         setGenerating(true);
+        setError(null);
         setCurrentStory(null);
         setOutput("");
+        setReaderSaved(false);
+        setReaderTitle(title);
+        setView("reader");
         const controller = new AbortController();
         abortRef.current = controller;
         try {
@@ -155,7 +167,7 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
                 id: makeId("tt"),
                 characterId: activeCharId,
                 kind,
-                title: (withIdea ?? idea).trim().slice(0, 24) || "未命名",
+                title,
                 content: full,
                 tone,
                 person,
@@ -168,10 +180,16 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
             };
             await saveTheaterStory(story);
             setCurrentStory(story);
+            setReaderSaved(true);
             await reloadStories();
         } catch (e) {
-            const msg = e instanceof Error ? e.message : "生成失败";
-            notice(msg);
+            if (controller.signal.aborted) {
+                // 用户主动停止：保留已流出的部分内容，不弹错误。
+            } else {
+                const msg = e instanceof Error ? e.message : String(e || "生成失败");
+                setError(msg);
+                notice(msg);
+            }
         } finally {
             setGenerating(false);
             abortRef.current = null;
@@ -181,11 +199,14 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
     const runInspiration = async () => {
         if (generating) return;
         setGenerating(true);
+        setError(null);
         try {
             const ideaText = await generateTheaterInspiration(activeCharId, (t) => setIdea((prev) => prev + t));
             setIdea(ideaText);
         } catch (e) {
-            notice(e instanceof Error ? e.message : "灵感生成失败");
+            const msg = e instanceof Error ? e.message : "灵感生成失败";
+            setError(msg);
+            notice(msg);
         } finally {
             setGenerating(false);
         }
@@ -194,6 +215,10 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
     const runContinue = async () => {
         if (generating || !currentStory) return;
         setGenerating(true);
+        setError(null);
+        setReaderSaved(false);
+        setReaderTitle(currentStory.title || "未命名");
+        setView("reader");
         const controller = new AbortController();
         abortRef.current = controller;
         try {
@@ -203,9 +228,16 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
             const updated: TheaterStory = { ...currentStory, content: full, updatedAt: new Date().toISOString() };
             await saveTheaterStory(updated);
             setCurrentStory(updated);
+            setReaderSaved(true);
             await reloadStories();
         } catch (e) {
-            notice(e instanceof Error ? e.message : "续写失败");
+            if (controller.signal.aborted) {
+                // 用户主动停止：保留已流出的部分内容，不弹错误。
+            } else {
+                const msg = e instanceof Error ? e.message : String(e || "续写失败");
+                setError(msg);
+                notice(msg);
+            }
         } finally {
             setGenerating(false);
             abortRef.current = null;
@@ -217,6 +249,64 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
         await saveTheaterStory(updated);
         if (currentStory?.id === story.id) setCurrentStory(updated);
         await reloadStories();
+    };
+
+    const toggleCurrentFavorite = async () => {
+        if (!currentStory) return;
+        await toggleFavorite(currentStory);
+    };
+
+    const transferCurrentToChat = () => {
+        if (!currentStory) return;
+        transferToChat(currentStory.content);
+    };
+
+    const backFromReader = () => {
+        if (generating) abortRef.current?.abort();
+        setView("form");
+    };
+
+    const openReader = (story: TheaterStory) => {
+        setTab(story.kind);
+        setOutput(story.content);
+        setCurrentStory(story);
+        setIdea(story.idea);
+        setTone(story.tone ?? "");
+        setPerson(story.person ?? "");
+        setStyleId(story.styleId ?? "");
+        setReaderTitle(story.title || "未命名");
+        setReaderSaved(true);
+        setError(null);
+        setView("reader");
+    };
+
+    const saveCurrentStory = async () => {
+        if (generating) return;
+        if (!output.trim()) { notice("没有可保存的正文"); return; }
+        const kind: TheaterStoryKind = currentStory?.kind ?? tab;
+        const now = new Date().toISOString();
+        const story: TheaterStory = currentStory
+            ? { ...currentStory, content: output, updatedAt: now }
+            : {
+                id: makeId("tt"),
+                characterId: activeCharId,
+                kind,
+                title: readerTitle || idea.trim().slice(0, 24) || "未命名",
+                content: output,
+                tone,
+                person,
+                styleId,
+                tags: selectedTags,
+                idea: idea.trim(),
+                createdAt: now,
+                updatedAt: now,
+                favorite: false,
+            };
+        await saveTheaterStory(story);
+        setCurrentStory(story);
+        setReaderSaved(true);
+        await reloadStories();
+        notice("已保存记录");
     };
 
     const addTag = () => {
@@ -246,6 +336,7 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
     };
 
     const sendDailyQuestion = async () => {
+        setError(null);
         try {
             const q = await generateDailyQuestion(activeCharId);
             const date = new Date().toISOString().slice(0, 10);
@@ -254,9 +345,33 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
             sendBrowserNotification("每日一问", { body: q });
             notice("每日一问已递出");
         } catch (e) {
-            notice(e instanceof Error ? e.message : "每日一问生成失败");
+            const msg = e instanceof Error ? e.message : "每日一问生成失败";
+            setError(msg);
+            notice(msg);
         }
     };
+
+    if (view === "reader") {
+        return (
+            <TheaterReader
+                title={readerTitle || currentStory?.title || "未命名"}
+                kind={currentStory?.kind ?? tab}
+                content={output}
+                generating={generating}
+                saved={readerSaved}
+                favorite={currentStory?.favorite ?? false}
+                error={error}
+                dark={config.darkMode}
+                onBack={backFromReader}
+                onSave={saveCurrentStory}
+                onStop={stop}
+                onContinue={runContinue}
+                onToggleFavorite={toggleCurrentFavorite}
+                onTransfer={transferCurrentToChat}
+                onDismissError={() => setError(null)}
+            />
+        );
+    }
 
     return (
         <>
@@ -334,30 +449,18 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
                     <input className="tt-input" style={{ marginTop: 8 }} placeholder="禁词规则（用逗号分隔，如：分手,渣男）" value={spec.forbiddenWords.join(",")} onChange={(e) => setSpec({ forbiddenWords: e.target.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })} />
                 </div>
 
+                {/* 错误提示 */}
+                {error && (
+                    <div className="tt-error" role="alert">
+                        <span>{error}</span>
+                        <button onClick={() => setError(null)} aria-label="关闭">×</button>
+                    </div>
+                )}
+
                 {/* 生成按钮 */}
                 <div className="tt-toolbar">
                     <button className="tt-btn" onClick={() => runGenerate()} disabled={generating}><Play size={15} /> 开始生成</button>
-                    {generating && <button className="tt-btn" data-ghost onClick={stop}><Square size={14} /> 停止</button>}
-                    {currentStory && !generating && <button className="tt-btn" data-ghost onClick={runContinue}><BookMarked size={14} /> 续写</button>}
                 </div>
-
-                {/* 流式输出 */}
-                <div>
-                    <div className="tt-label">正文（流式输出）</div>
-                    <div className="tt-output">
-                        {output}
-                        {generating && <span className="tt-cursor" />}
-                        {!output && !generating && <span style={{ color: "var(--tt-muted)" }}>生成的正文将在此逐字呈现…</span>}
-                    </div>
-                </div>
-
-                {/* 生成后操作 */}
-                {currentStory && !generating && (
-                    <div className="tt-toolbar">
-                        <button className="tt-btn" data-ghost onClick={() => toggleFavorite(currentStory)}><Heart size={14} fill={currentStory.favorite ? "currentColor" : "none"} /> {currentStory.favorite ? "已收藏" : "收藏"}</button>
-                        <button className="tt-btn" onClick={() => transferToChat(currentStory.content)}><Send size={14} /> 一键转入主聊天</button>
-                    </div>
-                )}
 
                 {/* 收藏列表 */}
                 {stories.filter((s) => s.favorite).length > 0 && (
@@ -368,7 +471,7 @@ export function TheaterApp({ onNotice }: { onNotice?: (msg: string) => void }) {
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                                     <b style={{ fontSize: 13 }}>{s.title}</b>
                                     <span style={{ display: "flex", gap: 6 }}>
-                                        <button className="tt-chip" onClick={() => { setTab(s.kind); setOutput(s.content); setCurrentStory(s); setIdea(s.idea); setTone(s.tone ?? ""); setPerson(s.person ?? ""); setStyleId(s.styleId ?? ""); }}>查看</button>
+                                        <button className="tt-chip" onClick={() => openReader(s)}>查看</button>
                                         <button className="tt-chip" onClick={() => toggleFavorite(s)}><X size={12} /></button>
                                     </span>
                                 </div>

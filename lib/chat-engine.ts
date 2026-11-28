@@ -2645,6 +2645,72 @@ async function generateNativeChatCompletion(
         if (outcomes.filter(item => item.result.continueConversation !== false).length === 0) {
             break;
         }
+
+        // 兜底生成：工具/MCP 连续调用到最后一轮时，强制补一次纯文本生成，
+        // 否则 parts 里没有最终正文，flattenCompletionResult 落库为空 → 回复被吞掉。
+        if (round === maxToolRounds - 1) {
+            try {
+                let finalOutput: string;
+                if (isSessionStreamingEnabled(session, true)) {
+                    let streamReasoning = "";
+                    const streamFinal = await sendLLMToolStreamRequest(
+                        config,
+                        preset,
+                        requestMessages,
+                        [],
+                        regexes,
+                        meta,
+                        {
+                            appId: options?.appId ?? "chat",
+                            appTags: requestAppTags,
+                            followUpCount: options?.followUpCount,
+                            debugSessionId: session.id,
+                            signal: options?.signal,
+                        },
+                        {
+                            onDelta: (text) => callbacks?.onStreamDelta?.(text),
+                            onReasoningDelta: onlineThinkingEnabled ? undefined : (text) => { streamReasoning += text; callbacks?.onReasoning?.(streamReasoning); },
+                        },
+                    );
+                    finalOutput = streamFinal.content;
+                } else {
+                    const final = await sendLLMToolRequest(
+                        config,
+                        preset,
+                        requestMessages,
+                        [],
+                        regexes,
+                        meta,
+                        {
+                            appId: options?.appId ?? "chat",
+                            appTags: requestAppTags,
+                            followUpCount: options?.followUpCount,
+                            debugSessionId: session.id,
+                            signal: options?.signal,
+                        },
+                    );
+                    finalOutput = final.content;
+                }
+                throwIfAborted(options?.signal);
+                // 线上思维链标签解析：开启时从正文提取 <tag> 思维链并剥离标签
+                if (onlineThinkingEnabled) {
+                    const tagThinking = extractThinkingTag(finalOutput, onlineThinkingTag);
+                    if (tagThinking) callbacks?.onReasoning?.(tagThinking);
+                    finalOutput = stripOnlineThinkingTag(finalOutput, onlineThinkingTag);
+                }
+                finalOutput = stripPresetTexts(finalOutput, preset);
+                await callbacks?.onTextPart?.(finalOutput);
+                parts.push({ text: finalOutput });
+                if (bailoutRef.shortcutHandles.length > 0) bailoutRef.shortcutCompleted = true;
+                break;
+            } catch (err) {
+                throwIfAborted(options?.signal);
+                const errMsg = `⚠️ 回复生成失败: ${err instanceof Error ? err.message : String(err)}`;
+                callbacks?.onToolNotice?.(errMsg);
+                parts.push({ text: "", toolNotice: errMsg });
+                break;
+            }
+        }
     }
 
     return { parts };
@@ -2814,6 +2880,55 @@ async function generateChatCompletionCore(
         tag: preset?.online_thinking_tag?.trim() || "thinking",
         reasoning: undefined as string | undefined,
     };
+    // 兜底生成：工具循环耗尽轮数时，强制补一次纯文本生成，保证 parts 里有最终正文，
+    // 否则 flattenCompletionResult 落库为空 → 回复被静默吞掉。
+    const emitFinalTextRound = async (): Promise<void> => {
+        try {
+            let finalOutput: string;
+            if (isSessionStreamingEnabled(session, true)) {
+                let streamReasoning = "";
+                const streamFinal = await sendLLMStreamRequest(config, preset, llmMessages, regexes, meta, {
+                    appId: options?.appId ?? "chat",
+                    appTags: requestAppTags,
+                    followUpCount: options?.followUpCount,
+                    debugSessionId: session.id,
+                    signal: options?.signal,
+                }, {
+                    onDelta: (text) => callbacks?.onStreamDelta?.(text),
+                    // 流式下 onReasoningDelta 是单段增量：累积后再喂 onReasoning（保持整段请求语义）。
+                    // 预设开启「线上标签解析」时不透传原生思维链（改由下方标签提取）
+                    onReasoningDelta: onlineThinking.enabled ? undefined : (text) => { streamReasoning += text; callbacks?.onReasoning?.(streamReasoning); },
+                });
+                finalOutput = streamFinal.content;
+            } else {
+                finalOutput = await sendLLMRequest(config, preset, llmMessages, regexes, meta, {
+                    appId: options?.appId ?? "chat",
+                    appTags: requestAppTags,
+                    followUpCount: options?.followUpCount,
+                    debugSessionId: session.id,
+                    signal: options?.signal,
+                    onReasoning: onlineThinking.enabled ? undefined : callbacks?.onReasoning,
+                });
+            }
+            throwIfAborted(options?.signal);
+            // 线上思维链标签解析：开启时从正文提取 <tag> 思维链并剥离标签
+            if (onlineThinking.enabled) {
+                const tagThinking = extractThinkingTag(finalOutput, onlineThinking.tag);
+                if (tagThinking) callbacks?.onReasoning?.(tagThinking);
+                finalOutput = stripOnlineThinkingTag(finalOutput, onlineThinking.tag);
+            }
+            // 剔除预设配置的文本片段（<思考结束> 等残留标签）
+            finalOutput = stripPresetTexts(finalOutput, preset);
+            await callbacks?.onTextPart?.(finalOutput);
+            parts.push({ text: finalOutput });
+            if (bailoutRef.shortcutHandles.length > 0) bailoutRef.shortcutCompleted = true;
+        } catch (err) {
+            throwIfAborted(options?.signal);
+            const errMsg = `⚠️ 回复生成失败: ${err instanceof Error ? err.message : String(err)}`;
+            callbacks?.onToolNotice?.(errMsg);
+            parts.push({ text: "", toolNotice: errMsg });
+        }
+    };
     for (let round = 0; round < maxToolRounds; round++) {
         let filteredOutput: string;
         try {
@@ -2943,6 +3058,11 @@ async function generateChatCompletionCore(
                     { role: "user", content: schemaContent, _debugMeta: { _fromHistory: true } },
                 );
             }
+            // 最后一轮仍在获取指令时，强制补一次纯文本生成，避免耗尽轮数后无最终回复。
+            if (round === maxToolRounds - 1) {
+                await emitFinalTextRound();
+                break;
+            }
             continue; // Next round — LLM will now call the tool with params
         }
 
@@ -3047,51 +3167,7 @@ async function generateChatCompletionCore(
 
             // Last round — one final call
             if (round === maxToolRounds - 1) {
-                try {
-                    let finalOutput: string;
-                    if (isSessionStreamingEnabled(session, true)) {
-                        let streamReasoning = "";
-                        const streamFinal = await sendLLMStreamRequest(config, preset, llmMessages, regexes, meta, {
-                            appId: options?.appId ?? "chat",
-                            appTags: requestAppTags,
-                            followUpCount: options?.followUpCount,
-                            debugSessionId: session.id,
-                            signal: options?.signal,
-                        }, {
-                            onDelta: (text) => callbacks?.onStreamDelta?.(text),
-                            // 流式下 onReasoningDelta 是单段增量：累积后再喂 onReasoning（保持整段请求语义）。
-                            // 预设开启「线上标签解析」时不透传原生思维链（改由下方标签提取）
-                            onReasoningDelta: onlineThinking.enabled ? undefined : (text) => { streamReasoning += text; callbacks?.onReasoning?.(streamReasoning); },
-                        });
-                        finalOutput = streamFinal.content;
-                    } else {
-                        finalOutput = await sendLLMRequest(config, preset, llmMessages, regexes, meta, {
-                            appId: options?.appId ?? "chat",
-                            appTags: requestAppTags,
-                            followUpCount: options?.followUpCount,
-                            debugSessionId: session.id,
-                            signal: options?.signal,
-                            onReasoning: onlineThinking.enabled ? undefined : callbacks?.onReasoning,
-                        });
-                    }
-                    throwIfAborted(options?.signal);
-                    // 线上思维链标签解析：开启时从正文提取 <tag> 思维链并剥离标签
-                    if (onlineThinking.enabled) {
-                        const tagThinking = extractThinkingTag(finalOutput, onlineThinking.tag);
-                        if (tagThinking) callbacks?.onReasoning?.(tagThinking);
-                        finalOutput = stripOnlineThinkingTag(finalOutput, onlineThinking.tag);
-                    }
-                    // 剔除预设配置的文本片段（<思考结束> 等残留标签）
-                    finalOutput = stripPresetTexts(finalOutput, preset);
-                    await callbacks?.onTextPart?.(finalOutput);
-                    parts.push({ text: finalOutput });
-                    if (bailoutRef.shortcutHandles.length > 0) bailoutRef.shortcutCompleted = true;
-                } catch (err) {
-                    throwIfAborted(options?.signal);
-                    const errMsg = `⚠️ 回复生成失败: ${err instanceof Error ? err.message : String(err)}`;
-                    callbacks?.onToolNotice?.(errMsg);
-                    parts.push({ text: "", toolNotice: errMsg });
-                }
+                await emitFinalTextRound();
             }
         }
     }

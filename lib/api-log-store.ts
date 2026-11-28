@@ -19,6 +19,12 @@ export type DebugInfo = {
     source?: "chat" | "background" | "qa";
     /** 归属通道：qa 进工坊专用环，其余进底层调用日志环。分流只认这个显式字段，不看角色名 */
     channel?: "chat" | "qa";
+    /** 接口名 / 端点（如 "TTS:FishAudio"、"chat:OpenAI"、请求 URL 等），用于日志面板快速识别 */
+    endpoint?: string;
+    /** HTTP 状态码（0 / undefined 表示网络层失败或无响应） */
+    statusCode?: number;
+    /** 具体报错返回内容摘要（与 rawResponse 区分：这里存精简后的错误说明） */
+    error?: string;
 };
 
 // 底层调用日志环容量。原为 50：聊天请求与 18 处 simpleLLMCall 后台调用（记忆总结、
@@ -105,6 +111,8 @@ function truncateEntryForLog(entry: Omit<DebugInfo, "id" | "timestamp">): Omit<D
         messages: truncateMessagesForLog(entry.messages),
         rawResponse: truncateForLog(entry.rawResponse, MAX_LOG_RESPONSE_CHARS),
         reasoning: entry.reasoning !== undefined ? truncateForLog(entry.reasoning, MAX_LOG_RESPONSE_CHARS) : undefined,
+        endpoint: entry.endpoint !== undefined ? truncateForLog(entry.endpoint, MAX_LOG_METADATA_CHARS) : undefined,
+        error: entry.error !== undefined ? truncateForLog(entry.error, MAX_LOG_RESPONSE_CHARS) : undefined,
     };
 }
 

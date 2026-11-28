@@ -12,6 +12,7 @@ export const PHOTO_WALL_CAPABILITY_ID = "photo_wall_service";
 export const MUSIC_CONTROL_CAPABILITY_ID = "music_control";
 export const CALENDAR_MANAGEMENT_CAPABILITY_ID = "calendar_management";
 export const SEND_FILE_CAPABILITY_ID = "send_file";
+export const GENERATE_LOCAL_FILE_CAPABILITY_ID = "generate_local_file";
 export const AGENT_COMPUTER_CAPABILITY_ID = "agent_computer";
 export const LOCAL_DATA_LIBRARY_CAPABILITY_ID = "local_data_library";
 export const TOOLBOX_MANAGEMENT_CAPABILITY_ID = "toolbox_management";
@@ -44,6 +45,7 @@ export const RESERVED_INTERNAL_TOOL_NAMES: string[] = [
     "写入系统日历",
     "写入记忆",
     "发送文件",
+    "生成本地文件",
     "角色电脑",
     "稍后主动联系",
     "设置定时醒来",
@@ -764,6 +766,36 @@ const SEND_FILE_USAGE_GUIDE = [
     '[执行动作:发送文件({"url":"https://example.com/song.mp3","type":"audio","title":"为你写的歌"})]',
 ].join("\n");
 
+const GENERATE_LOCAL_FILE_PARAMETER_SCHEMA = JSON.stringify({
+    type: "object",
+    properties: {
+        filename: {
+            type: "string",
+            description: "要生成的文件名，需带扩展名，例如 style.css、说明.txt、config.json、笔记.md。只允许字母数字、点、下划线、连字符和中文。",
+        },
+        content: {
+            type: "string",
+            description: "文件的完整纯文本内容（可含换行）。写清楚要交付给用户的全部内容。",
+        },
+    },
+    required: ["filename", "content"],
+});
+
+const GENERATE_LOCAL_FILE_USAGE_GUIDE = [
+    "以下是你获取指令的返回结果：",
+    "服务：生成本地文件",
+    "用途：当你需要交付一段可直接保存的文本（样式、配置、说明、代码、笔记等）时，直接生成一个本地文件，让{{user}}在聊天室里点击下载。",
+    "",
+    "使用场景：例如{{user}}要你写一份 CSS、一段 JSON 配置、一份说明文档或代码片段，与其贴在回复里，不如生成文件让 TA 直接保存。",
+    "",
+    "动作：生成本地文件",
+    "参数：",
+    "  - filename (string, 必填): 带扩展名的文件名，如 style.css、data.json、说明.txt",
+    "  - content (string, 必填): 文件完整纯文本内容",
+    "示例：",
+    '[执行动作:生成本地文件({"filename":"theme.css","content":".phone{background:#fff;}"})]',
+].join("\n");
+
 const LOCAL_DATA_LIST_PARAMETER_SCHEMA = JSON.stringify({
     type: "object",
     properties: {
@@ -1415,6 +1447,15 @@ const BUILTIN_INTERNAL_CAPABILITIES: InternalCapabilityConfig[] = [
         updatedAt: 0,
     },
     {
+        id: GENERATE_LOCAL_FILE_CAPABILITY_ID,
+        name: "生成本地文件",
+        description: "直接生成一个本地文件（文本类：.css / .txt / .json / .md / .html 等）并在聊天室里作为可点击下载的文件卡片交付给{{user}}。你只需要给出文件名和纯文本内容，系统会把内容写进文件让{{user}}下载保存。",
+        enabled: false,
+        mode: "auto",
+        createdAt: 0,
+        updatedAt: 0,
+    },
+    {
         id: LOCAL_DATA_LIBRARY_CAPABILITY_ID,
         name: "本地资料库",
         description: "浏览、读取和搜索{{user}}小手机里的本地数据，包括角色卡、聊天、朋友圈、记忆、工具箱、设置和应用数据。",
@@ -1563,6 +1604,14 @@ export function getInternalCapabilityToolDefinition(capability: InternalCapabili
             description: capability.description,
             parameterSchema: SEND_FILE_PARAMETER_SCHEMA,
             usageGuide: SEND_FILE_USAGE_GUIDE,
+        };
+    }
+    if (capability.id === GENERATE_LOCAL_FILE_CAPABILITY_ID) {
+        return {
+            name: capability.name,
+            description: capability.description,
+            parameterSchema: GENERATE_LOCAL_FILE_PARAMETER_SCHEMA,
+            usageGuide: GENERATE_LOCAL_FILE_USAGE_GUIDE,
         };
     }
     if (capability.id === LOCAL_DATA_LIBRARY_CAPABILITY_ID) {
