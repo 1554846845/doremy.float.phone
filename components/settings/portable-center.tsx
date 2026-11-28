@@ -174,15 +174,41 @@ export function PortableCenter({ onNotice }: { onNotice?: (message: string) => v
         }
     };
 
-    // ── 本机备份导入 ────────────────────────────────────
+    // ── 本机备份导入（同时兼容鲸鱼机备份） ──────────────
+    const stageLegacy = (payload: unknown, bytes: number) => {
+        const preview = detectLegacyBackup(payload);
+        if (!preview) throw new Error("没有识别出鲸鱼机备份结构（缺少 friends / messages / littlephone_ 键）。");
+        setPendingLegacy({ payload, preview, bytes });
+        if (bytes > 80 * 1024 * 1024) {
+            showNotice({
+                kind: "warn",
+                text: `文件较大（${formatBytes(bytes)}），建议在电脑 Chrome 里导入；手机 WebView 内存不足时可能解析失败。`,
+            });
+        }
+    };
+
     const pickBackupFile = async (file: File | null | undefined) => {
         if (!file) return;
         setNotice(null);
         setImportResult(null);
+        setPendingLegacy(null);
         try {
             const text = await readFileText(file);
-            const { backup, warnings } = await parsePortableBackup(text);
-            setPendingRestore({ backup, warnings, bytes: file.size });
+            const head = text.slice(0, 4096);
+            if (head.includes("ai-phone-portable-backup")) {
+                const { backup, warnings } = await parsePortableBackup(text);
+                setPendingRestore({ backup, warnings, bytes: file.size });
+                return;
+            }
+            // 不是本机格式，但可能是鲸鱼机/旧版备份：自动切到迁移预览。
+            let payload: unknown;
+            try {
+                payload = JSON.parse(text);
+            } catch {
+                throw new Error("既不是本应用备份，也不是合法的 JSON 文件。");
+            }
+            stageLegacy(payload, file.size);
+            showNotice({ kind: "warn", text: "检测到旧版/鲸鱼机备份，已切换到「从鲸鱼机迁移」预览，确认后开始转换。" });
         } catch (error) {
             setPendingRestore(null);
             showNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) });
@@ -226,15 +252,7 @@ export function PortableCenter({ onNotice }: { onNotice?: (message: string) => v
             } catch {
                 throw new Error("不是合法的 JSON 文件。");
             }
-            const preview = detectLegacyBackup(payload);
-            if (!preview) throw new Error("没有识别出鲸鱼机备份结构（缺少 friends / messages / littlephone_ 键）。");
-            setPendingLegacy({ payload, preview, bytes: file.size });
-            if (file.size > 80 * 1024 * 1024) {
-                showNotice({
-                    kind: "warn",
-                    text: `文件较大（${formatBytes(file.size)}），建议在电脑 Chrome 里导入；手机 WebView 内存不足时可能解析失败。`,
-                });
-            }
+            stageLegacy(payload, file.size);
         } catch (error) {
             setPendingLegacy(null);
             showNotice({ kind: "error", text: error instanceof Error ? error.message : String(error) });
@@ -409,8 +427,8 @@ export function PortableCenter({ onNotice }: { onNotice?: (message: string) => v
                     <section className={styles.card}>
                         <header className={styles.cardHead}>
                             <div>
-                                <h2>导入本机备份</h2>
-                                <p>覆盖写入当前设备，导入完成后需要刷新一次页面。</p>
+                                <h2>导入备份</h2>
+                                <p>支持本机全量备份，也兼容鲸鱼机备份（自动识别格式）。覆盖写入，导入后需刷新。</p>
                             </div>
                             <span className={`${styles.badge} ${styles.badgeRose}`}>覆盖</span>
                         </header>
