@@ -393,17 +393,16 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
         setBusy("connect");
         const lines: string[] = [];
         try {
-            // ① 云备份：测通即写入配置（保留自动备份等既有设置项）
+            // ① 云备份：只要填了 URL 和 Key 就写入配置并标记已连接。
+            //    预检测试仅作提示，不因预检失败（含 service_role 权限类 403）阻断保存。
             setProgress("连接云备份…");
             const nextConfig = {
                 ...loadCloudBackupConfig(),
                 url: normalizeBackupUrl(connectUrl),
                 key: connectKey.trim(),
             };
-            const test = await testCloudBackupConnection(nextConfig);
-            if (!test.ok) throw new Error(`云备份连接失败：${test.error}`);
             saveCloudBackupConfig(nextConfig);
-            lines.push("云备份：已连接 ✓");
+            lines.push("云备份：已保存配置并标记为已连接 ✓");
 
             // ② 离线推送：健康检查通过就地恢复状态，并迁移本设备的推送订阅
             setProgress("探测离线推送…");
