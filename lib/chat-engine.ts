@@ -67,6 +67,7 @@ import { fetchLlmPayload } from "./llm-http";
 import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
+import { buildMemoryVaultPromptBlock } from "./memory-vault/injector";
 import { maybeRunSummarization } from "./memory-summarizer";
 import { prepareShortTermContext } from "./short-term-assembler";
 import { parseActionTags, dispatchActions } from "./action-parser";
@@ -1998,7 +1999,13 @@ export async function buildChatPromptMessages(
             buildCharacterEconomyContext(character.id),
         ]),
     ].filter(Boolean).join("\n\n");
-    const coreMemories = options?.isolatedPromptContext === true ? "" : (coreResults ? formatCoreMemories(coreResults) : "");
+    const coreMemoryText = options?.isolatedPromptContext === true ? "" : (coreResults ? formatCoreMemories(coreResults) : "");
+    // 记忆库（用户亲手确认的长期事实）排在最前且不参与滑窗裁剪：
+    // 自动记忆会被 token 预算裁掉，而姓名/称呼/约定这类事实一旦丢了就是人设崩坏。
+    const vaultMemoryBlock = options?.isolatedPromptContext === true || session.isGroup
+        ? ""
+        : await buildMemoryVaultPromptBlock(character.id).catch(() => "");
+    const coreMemories = [vaultMemoryBlock, coreMemoryText].filter(Boolean).join("\n\n");
     const scheduleSummary = buildCalendarScheduleMarker("character", character.id, getWeekStartIso(now));
     const currentSchedule = getCurrentCalendarScheduleForPrompt("character", character.id, now);
     const musicOnlineHint = isNeteaseConfigured() ? "- 你可以推荐任何歌曲，系统会在线搜索并播放。不局限于用户本地音乐库。\n" : "\n";

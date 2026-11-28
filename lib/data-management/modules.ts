@@ -180,6 +180,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
     critical: true,
     sources: [
       { type: "indexeddb", dbName: "ai_phone_memory_db_v1", label: "记忆数据库" },
+      { type: "indexeddb", dbName: "ai_phone_memory_vault_v1", label: "记忆库（手动长期记忆）" },
       {
         type: "kv",
         label: "记忆配置与计数",

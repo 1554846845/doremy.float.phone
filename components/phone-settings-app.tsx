@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, createContext, type CSSProperties, type ReactNode } from "react";
-import { Activity, AlertTriangle, BatteryCharging, CalendarDays, Camera, Check, ChevronRight, Clock, Database, FileText, Fingerprint, Globe, HardDrive, Image, Info, KeyRound, Laptop, Layers, LayoutTemplate, Link2, Loader2, LogOut, MessageSquare, Mic, PhoneCall, SlidersHorizontal, UserCircle, Wrench, X, CloudUpload, Zap, Smartphone } from "lucide-react";
+import { Activity, AlertTriangle, BatteryCharging, CalendarDays, Camera, Check, ChevronRight, Clock, Database, FileText, Fingerprint, Globe, HardDrive, Image, Info, KeyRound, Laptop, Layers, LayoutTemplate, Link2, Loader2, LogOut, MessageSquare, Mic, PhoneCall, SlidersHorizontal, UserCircle, Wrench, X, CloudUpload, Zap, Smartphone, Brain } from "lucide-react";
 import { ConfirmDialog } from "./ui/modal";
 import { useAccount } from "@/lib/account-context";
 import { isSelfHostedModeEnabled } from "@/lib/self-hosting";
@@ -13,6 +13,7 @@ import { PresetManager } from "./settings/preset-manager";
 import { WorldBookManager } from "./settings/worldbook-manager";
 import { RegexManager } from "./settings/regex-manager";
 import { DataManagement } from "./settings/data-management";
+import { PortableCenter } from "./settings/portable-center";
 import { UserIdentitySettings } from "./settings/user-identity";
 import { AboutDeclaration } from "./settings/about-declaration";
 import { BindingManager } from "./settings/binding-manager";
@@ -60,6 +61,7 @@ type SubPage =
     | "worldbook"
     | "regex"
     | "data"
+    | "portable"
     | "binding"
     | "identity"
     | "cloud"
@@ -86,6 +88,7 @@ const SETTINGS_MENU = [
     { id: "worldbook", icon: Globe, label: "世界书", desc: "世界观设定", iconColor: BINDING_ACCENTS.worldBook , glass: "worldbook" },
     { id: "regex", icon: Database, label: "正则规则", desc: "文本替换", iconColor: BINDING_ACCENTS.regex , glass: "regex" },
     { id: "data", icon: Layers, label: "数据管理", desc: "导入导出", iconColor: BINDING_ACCENTS.api , glass: "data" },
+    { id: "portable", icon: Brain, label: "搬家与记忆", desc: "全量备份 / 记忆库", iconColor: BINDING_ACCENTS.memory , glass: "" },
     { id: "binding", icon: Link2, label: "配置绑定", desc: "管理全局默认、角色与应用的配置绑定关系", iconColor: BINDING_ACCENTS.identity , glass: "binding" },
     { id: "cloud", icon: CloudUpload, label: "云服务部署", desc: "备份 / 微信 / 推送一站配置", iconColor: BINDING_ACCENTS.api , glass: "" },
     { id: "weixin", icon: MessageSquare, label: "微信接入", desc: "iLink Bot", iconColor: CONTENT_APP_ACCENTS.chat , glass: "weixin" },
@@ -339,6 +342,8 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                 return <RegexManager isActive />;
             case "data":
                 return <DataManagement onNotice={onNotice} />;
+            case "portable":
+                return <PortableCenter onNotice={onNotice} />;
             case "binding":
                 return <BindingManager />;
             case "cloud":
