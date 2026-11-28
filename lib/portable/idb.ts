@@ -108,6 +108,11 @@ export async function dumpDatabase(name: string): Promise<PortableIdbDatabase> {
             const store = tx.objectStore(storeName);
             const meta = readStoreMeta(store);
             meta.records = await readAllRecords(store);
+            // 媒体缓存存的是 Blob，必须编码后才能进 JSON。
+            meta.records = await Promise.all(meta.records.map(async (record) => ({
+                ...record,
+                value: await encodeValue(record.value),
+            })));
             stores.push(meta);
         }
         return { name, version: db.version, stores };
@@ -185,6 +190,77 @@ export async function ensureDatabase(database: PortableIdbDatabase): Promise<IDB
 
 const WRITE_CHUNK = 400;
 
+// IndexedDB 里允许直接存 Blob（媒体缓存就是这么做的），但 JSON.stringify 会把
+// Blob 变成 `{}`——不处理的话「一键搬家」搬完图片全丢。这里用带标记的对象把
+// Blob 编码成 base64，恢复时再还原成 Blob。
+const BLOB_MARKER = "__aiPhoneBlobV1";
+
+function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = String(reader.result ?? "");
+            const comma = result.indexOf(",");
+            resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error ?? new Error("读取二进制数据失败"));
+        reader.readAsDataURL(blob);
+    });
+}
+
+function base64ToBlob(base64: string, mime: string): Blob {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mime || "application/octet-stream" });
+}
+
+async function encodeValue(value: unknown, depth = 0): Promise<unknown> {
+    if (depth > 6 || value === null || value === undefined) return value;
+    if (typeof Blob !== "undefined" && value instanceof Blob) {
+        try {
+            return { [BLOB_MARKER]: true, type: value.type || "", data: await blobToBase64(value) };
+        } catch (error) {
+            console.warn("[portable] Blob 编码失败，已跳过该字段", error);
+            return null;
+        }
+    }
+    if (Array.isArray(value)) {
+        return Promise.all(value.map((item) => encodeValue(item, depth + 1)));
+    }
+    if (typeof value === "object") {
+        const proto = Object.getPrototypeOf(value);
+        if (proto !== Object.prototype && proto !== null) return value; // Date/Map 等交给 JSON 自己处理
+        const entries = await Promise.all(
+            Object.entries(value as Record<string, unknown>)
+                .map(async ([key, item]) => [key, await encodeValue(item, depth + 1)] as const),
+        );
+        return Object.fromEntries(entries);
+    }
+    return value;
+}
+
+function decodeValue(value: unknown, depth = 0): unknown {
+    if (depth > 6 || value === null || value === undefined) return value;
+    if (Array.isArray(value)) return value.map((item) => decodeValue(item, depth + 1));
+    if (typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        if (record[BLOB_MARKER] === true && typeof record.data === "string") {
+            try {
+                return base64ToBlob(record.data, typeof record.type === "string" ? record.type : "");
+            } catch (error) {
+                console.warn("[portable] Blob 还原失败，已改为空值", error);
+                return null;
+            }
+        }
+        const entries = Object.entries(record).map(([key, item]) => [key, decodeValue(item, depth + 1)] as const);
+        return Object.fromEntries(entries);
+    }
+    return value;
+}
+
 /** 清空写入一个仓库；分块提交，避免单事务塞几万条把主线程卡死。 */
 export async function replaceStoreRecords(
     db: IDBDatabase,
@@ -214,8 +290,9 @@ export async function replaceStoreRecords(
             const target = tx.objectStore(store.name);
             for (const record of chunk) {
                 try {
-                    if (store.keyPath === null) target.put(record.value, record.key as IDBValidKey);
-                    else target.put(record.value);
+                    const value = decodeValue(record.value);
+                    if (store.keyPath === null) target.put(value as unknown, record.key as IDBValidKey);
+                    else target.put(value as unknown);
                 } catch (error) {
                     // 单条坏记录不能拖垮整次导入：跳过并继续写后面的。
                     console.warn("[portable] 跳过一条无法写入的记录", store.name, error);
