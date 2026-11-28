@@ -31,6 +31,55 @@ type Step = {
 
 const SHELL_PREFIX = "shell:";
 
+/**
+ * 给服务端密钥做一次"体检"，把「Invalid API key」拆成能照着改的一句话。
+ *
+ * 为什么需要：Supabase 对错误的钥匙只会回 `Invalid API key`，三种完全不同的
+ * 错法（用了 anon 公钥、从别的项目复制、复制时被截断或带了空白）表现一模一样，
+ * 用户对着两个长得几乎相同的长串根本没法自查。这里只报告长度、格式、角色和
+ * 所属项目，不回显密钥本身。
+ */
+function describeServerKey(url: string, key: string): { ok: boolean; detail: string } {
+  const notes: string[] = [];
+  let ok = true;
+  const trimmed = key.trim();
+  notes.push(`长度 ${key.length} 位`);
+  if (key !== trimmed) {
+    ok = false;
+    notes.push("⚠️ 首尾带空格或换行——Supabase 会直接判成 Invalid API key，删掉空白再存");
+  }
+  let projectRef = "";
+  try { projectRef = new URL(url).hostname.split(".")[0] || ""; } catch { /* URL 已在上一步校验过 */ }
+  if (trimmed.startsWith("eyJ")) {
+    try {
+      const payload = JSON.parse(
+        Buffer.from(trimmed.split(".")[1] ?? "", "base64url").toString("utf8"),
+      ) as { role?: string; ref?: string };
+      notes.push(`格式 JWT，role=${payload.role ?? "?"}，所属项目=${payload.ref ?? "?"}`);
+      if (payload.role !== "service_role") {
+        ok = false;
+        notes.push("⚠️ 这不是 service_role 密钥（权限不够，任何表都读不到）");
+      }
+      if (payload.ref && projectRef && payload.ref !== projectRef) {
+        ok = false;
+        notes.push(`⚠️ 这把钥匙属于另一个项目 ${payload.ref}，不是 ${projectRef}`);
+      }
+    } catch {
+      ok = false;
+      notes.push("⚠️ JWT 解不开，密钥多半被复制残缺了（少了结尾一段）");
+    }
+  } else if (trimmed.startsWith("sb_secret_")) {
+    notes.push("格式：新版 secret key");
+  } else if (trimmed.startsWith("sb_publishable_")) {
+    ok = false;
+    notes.push("⚠️ 这是 publishable 公钥，不是 secret key");
+  } else {
+    ok = false;
+    notes.push("⚠️ 既不是 eyJ… 也不是 sb_secret_…，多半不是这个项目的密钥");
+  }
+  return { ok, detail: notes.join("；") };
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   // 探测广播会真的弹一条通知，允许用 ?probe=0 关掉。
@@ -50,6 +99,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, steps, summary: "站点未配置 Supabase，后续步骤无法进行。" });
   }
   steps.push({ key: "site", label: "站点 Supabase 配置", status: "ok", detail: `已配置：${supabase.url}` });
+
+  const keyCheck = describeServerKey(supabase.url, supabase.key);
+  steps.push({
+    key: "key",
+    label: "服务端密钥体检",
+    status: keyCheck.ok ? "ok" : "fail",
+    detail: keyCheck.detail,
+    hint: keyCheck.ok
+      ? undefined
+      : "到 Supabase → Project Settings → API Keys，整串重新复制 service_role（secret）那个，整串替换 Vercel 里 SUPABASE_SERVICE_ROLE_KEY 的值（不要把首尾空白带进去），然后 Redeploy。",
+  });
 
   // 单机模式现在由 lib/self-hosting.ts 固定开启，不再依赖构建期环境变量；
   // 这里如实报告它的实际取值，而不是去读一个可能根本没设的变量。
