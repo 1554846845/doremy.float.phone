@@ -140,6 +140,20 @@ export async function GET(request: Request) {
   }
   steps.push({ key: "site", label: "站点 Supabase 配置", status: "ok", detail: `已配置：${supabase.url}` });
 
+  // 说明这两项到底取自哪个环境变量：改了「另一个变量」是最常见的白忙一场。
+  const urlSource = process.env.SUPABASE_URL
+    ? "SUPABASE_URL"
+    : process.env.NEXT_PUBLIC_SUPABASE_URL ? "NEXT_PUBLIC_SUPABASE_URL" : "（未设置）";
+  const keySource = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? "SUPABASE_SERVICE_ROLE_KEY"
+    : process.env.SUPABASE_SECRET_KEY ? "SUPABASE_SECRET_KEY" : "（未设置）";
+  steps.push({
+    key: "env",
+    label: "变量来源",
+    status: "ok",
+    detail: `地址取自 ${urlSource}；密钥取自 ${keySource}。改了别的变量名不会生效。`,
+  });
+
   const keyCheck = describeServerKey(supabase.url, supabase.key);
   steps.push({
     key: "key",
